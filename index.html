@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Онлайн-доска</title>
+<style>
+  :root{
+    --bg:#f3f3f4;          /* поле */
+    --panel:#ffffff;        /* панель инструментов */
+    --line:#e4e4e7;         /* разделители, рамки */
+    --ui:#3f3f46;           /* иконки */
+    --ui-strong:#18181b;    /* активная иконка/текст */
+    --muted:#a1a1aa;        /* приглушённое */
+    --hover:#f0f0f2;        /* ховер кнопок */
+    --sel:#ececef;          /* фон активного инструмента */
+    --grid:#e3e3e6;         /* линии сетки */
+    --grid-strong:#d7d7db;  /* линейка */
+    --accent:#27272a;       /* кольцо выбора */
+    --radius:11px;
+    --shadow:0 1px 0 rgba(0,0,0,.04), 0 2px 8px rgba(0,0,0,.05);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0;height:100%;width:100%;overflow:hidden;background:var(--bg);
+    overscroll-behavior:none;-webkit-text-size-adjust:100%;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ui);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+  }
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;}
+
+  /* ---------- Панель ---------- */
+  #bar{
+    flex:0 0 auto;display:flex;align-items:center;gap:6px;
+    height:54px;padding:0 10px;background:var(--panel);
+    border-bottom:1px solid var(--line);box-shadow:var(--shadow);
+    overflow-x:auto;overflow-y:hidden;scrollbar-width:none;z-index:5;
+  }
+  #bar::-webkit-scrollbar{display:none;}
+  .group{display:flex;align-items:center;gap:4px;flex:0 0 auto;}
+  .sep{flex:0 0 auto;width:1px;height:26px;background:var(--line);margin:0 4px;}
+  .spacer{flex:1 1 auto;min-width:6px;}
+
+  .btn{
+    flex:0 0 auto;width:40px;height:40px;border:none;background:transparent;border-radius:var(--radius);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ui);
+    transition:background .12s ease;padding:0;position:relative;
+  }
+  .btn:hover{background:var(--hover);}
+  .btn:active{background:var(--sel);}
+  .btn:focus-visible{outline:2px solid var(--ui-strong);outline-offset:-2px;}
+  .btn.on{background:var(--sel);color:var(--ui-strong);}
+  .btn svg{width:22px;height:22px;display:block;pointer-events:none;}
+  .btn[disabled]{opacity:.35;cursor:default;}
+  .btn[disabled]:hover{background:transparent;}
+
+  /* свотчи цветов */
+  .swatch{
+    flex:0 0 auto;width:40px;height:40px;border:none;background:transparent;border-radius:var(--radius);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;position:relative;
+  }
+  .swatch:hover{background:var(--hover);}
+  .swatch .dot{
+    width:24px;height:24px;border-radius:50%;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);
+  }
+  .swatch.hl .dot{width:26px;height:15px;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);}
+  .swatch.sel::after{
+    content:"";position:absolute;inset:4px;border-radius:9px;
+    box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent);
+  }
+
+  /* размер кисти: три точки */
+  .sizes{display:flex;align-items:center;gap:2px;}
+  .size{
+    flex:0 0 auto;width:32px;height:40px;border:none;background:transparent;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+  }
+  .size:hover{background:var(--hover);}
+  .size .pip{border-radius:50%;background:var(--ui);}
+  .size.sel{background:var(--sel);}
+  .size.sel .pip{background:var(--ui-strong);}
+
+  /* сегмент сетки */
+  .seg{display:flex;align-items:center;background:var(--bg);border-radius:10px;padding:3px;gap:2px;}
+  .seg .btn{width:34px;height:32px;border-radius:7px;}
+  .seg .btn svg{width:18px;height:18px;}
+  .seg .btn.on{background:var(--panel);color:var(--ui-strong);box-shadow:0 1px 2px rgba(0,0,0,.08);}
+
+  /* ---------- Холст ---------- */
+  #stage{position:relative;flex:1 1 auto;min-height:0;background:var(--bg);overflow:hidden;touch-action:none;}
+  #stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+  #back{z-index:1;}
+  #ink{z-index:2;}
+  #overlay{z-index:3;touch-action:none;}
+
+  /* нижний скроллбар */
+  #hbar{
+    position:absolute;left:8px;right:8px;bottom:7px;height:9px;z-index:4;pointer-events:none;
+    border-radius:9px;background:rgba(0,0,0,.05);opacity:0;transition:opacity .25s ease;
+  }
+  #hbar.show{opacity:1;}
+  #thumb{position:absolute;top:0;height:100%;border-radius:9px;background:rgba(0,0,0,.22);cursor:grab;min-width:28px;pointer-events:auto;}
+  #thumb:active{cursor:grabbing;background:rgba(0,0,0,.32);}
+
+  /* тост */
+  #toast{
+    position:absolute;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);
+    background:var(--ui-strong);color:#fff;font-size:13px;padding:9px 14px;border-radius:10px;
+    opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;z-index:20;white-space:nowrap;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  /* ---------- Голосовой звонок ---------- */
+  .callbtn.active{background:#10b981;color:#fff;}
+  .callbtn.active:hover{background:#0ea674;}
+  .callbtn.active::after{
+    content:attr(data-count);position:absolute;top:2px;right:2px;min-width:15px;height:15px;
+    padding:0 3px;border-radius:8px;background:var(--ui-strong);color:#fff;font-size:10px;
+    line-height:15px;text-align:center;box-shadow:0 0 0 2px var(--panel);
+  }
+  .micbtn.muted{color:#dc2626;}
+  .micbtn .mic-off{display:none;}
+  .micbtn.muted .mic-on{display:none;}
+  .micbtn.muted .mic-off{display:block;}
+
+  #audioSink{position:absolute;width:0;height:0;overflow:hidden;}
+
+  #voicePanel{
+    position:absolute;left:10px;bottom:14px;z-index:18;min-width:150px;max-width:230px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    box-shadow:var(--shadow);padding:8px;font-size:13px;color:var(--ui-strong);
+  }
+  .vp-head{display:flex;align-items:center;gap:6px;font-weight:600;margin:2px 4px 6px;
+    font-size:12px;color:var(--ui);}
+  .vp-live{width:8px;height:8px;border-radius:50%;background:#10b981;animation:vp-pulse 1.6s infinite;}
+  @keyframes vp-pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.5);}70%{box-shadow:0 0 0 6px rgba(16,185,129,0);}100%{box-shadow:0 0 0 0 rgba(16,185,129,0);}}
+  .vp-item{display:flex;align-items:center;gap:8px;padding:4px;border-radius:8px;}
+  .vp-item.pending{opacity:.55;}
+  .vp-dot{width:9px;height:9px;border-radius:50%;background:var(--c,#888);flex:0 0 auto;
+    transition:box-shadow .1s ease,transform .1s ease;}
+  .vp-dot.speaking{box-shadow:0 0 0 3px color-mix(in srgb, var(--c) 35%, transparent);transform:scale(1.18);}
+  .vp-name{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .vp-name em{color:var(--muted);font-style:normal;font-size:11px;}
+  .vp-mute{flex:0 0 auto;font-size:12px;}
+
+  .hidden{display:none !important;}
+
+  @media (max-width:560px){
+    .btn,.swatch{width:36px;height:36px;}
+    #bar{height:50px;gap:4px;}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none !important;}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <div class="group" id="penColors"></div>
+    <div class="sep"></div>
+    <div class="group" id="hlColors"></div>
+    <button class="btn" id="eraserBtn" title="Ластик (E)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16.5 4.5 21 9 11 19H6.5L3.5 16 13.5 6"/><path d="M9 19l-2.5-2.5 9.5-9.5 2.5 2.5"/><path d="M7 19h13"/>
+      </svg>
+    </button>
+    <button class="btn" id="selectBtn" title="Переместить изображение (V)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v18M3 12h18"/><path d="M12 3 9.5 6M12 3l2.5 3M12 21l-2.5-3M12 21l2.5-3M3 12l3-2.5M3 12l3 2.5M21 12l-3-2.5M21 12l-3 2.5"/>
+      </svg>
+    </button>
+
+    <div class="sep"></div>
+    <div class="sizes" id="sizes" title="Толщина"></div>
+
+    <div class="spacer"></div>
+
+    <div class="seg" id="gridSeg" title="Фон / сетка">
+      <button class="btn" data-grid="none" title="Без сетки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+      </button>
+      <button class="btn" data-grid="grid" title="Клетка">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9.3 4v16M14.6 4v16M4 9.3h16M4 14.6h16"/></svg>
+      </button>
+      <button class="btn" data-grid="dots" title="Точки">
+        <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="1.2"/><circle cx="12" cy="7" r="1.2"/><circle cx="17" cy="7" r="1.2"/><circle cx="7" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="17" cy="12" r="1.2"/><circle cx="7" cy="17" r="1.2"/><circle cx="12" cy="17" r="1.2"/><circle cx="17" cy="17" r="1.2"/></svg>
+      </button>
+      <button class="btn" data-grid="lines" title="Линейка">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+
+    <div class="sep"></div>
+    <button class="btn" id="imgBtn" title="Прикрепить изображение">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5-5L5 20"/></svg>
+    </button>
+    <button class="btn" id="exportBtn" title="Экспорт PNG">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+    </button>
+
+    <div class="sep"></div>
+    <button class="btn callbtn" id="callBtn" title="Голосовой звонок" data-count="0">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5c.5 0 .9.3 1 .8l.8 3a1 1 0 0 1-.27 1l-1.4 1.3a12.5 12.5 0 0 0 4.97 4.97l1.3-1.4a1 1 0 0 1 1-.27l3 .8c.5.13.8.5.8 1V18a2 2 0 0 1-2.2 2A15.5 15.5 0 0 1 4.5 6.7 2 2 0 0 1 6.5 4.5z"/></svg>
+    </button>
+    <button class="btn micbtn hidden" id="muteBtn" title="Выключить микрофон">
+      <svg class="mic-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      <svg class="mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9v2a3 3 0 0 0 4.5 2.6M15 11.2V6a3 3 0 0 0-5.7-1.3M5 11a7 7 0 0 0 10.5 6M12 18v3M4 4l16 16"/></svg>
+    </button>
+
+    <div class="sep"></div>
+    <button class="btn" id="undoBtn" title="Отменить (Ctrl/⌘+Z)" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7 4 12l5 5"/><path d="M4 12h11a5 5 0 0 1 0 10h-1"/></svg>
+    </button>
+    <button class="btn" id="redoBtn" title="Повторить (Ctrl/⌘+⇧+Z)" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m15 7 5 5-5 5"/><path d="M20 12H9a5 5 0 0 0 0 10h1"/></svg>
+    </button>
+    <button class="btn" id="clearBtn" title="Очистить доску">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>
+    </button>
+  </div>
+
+  <div id="stage">
+    <canvas id="back"></canvas>
+    <canvas id="ink"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="hbar"><div id="thumb"></div></div>
+    <div id="audioSink" aria-hidden="true"></div>
+    <div id="voicePanel" class="hidden">
+      <div class="vp-head"><span class="vp-live"></span>В звонке</div>
+      <div id="voiceRoster"></div>
+    </div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<input id="fileInput" type="file" accept="image/*" class="hidden">
+
+<script type="module">
+import { BoardStorage } from './storage.js';
+import { CanvasRenderer } from './canvas.js';
+import { NetworkManager } from './network.js';
+import { HistoryManager } from './history.js';
+import { ToolManager } from './tools.js';
+import { VoiceManager } from './voice.js';
+
+(function() {
+  "use strict";
+
+  const storage = new BoardStorage();
+  const renderer = new CanvasRenderer(storage);
+  const network = new NetworkManager(storage, () => renderer.fullRender());
+  const history = new HistoryManager(storage, network, () => renderer.fullRender());
+  const tools = new ToolManager(storage, renderer, network, history);
+
+  network.init();
+
+  const voice = new VoiceManager(storage, network);
+  voice.initUI();
+
+  // Expose globally for testing/debugging
+  window._board = { storage, renderer, network, history, tools, voice };
+})();
+</script>
+</body>
+</html>
