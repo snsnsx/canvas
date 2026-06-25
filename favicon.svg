@@ -1,18 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect width="100" height="100" fill="#0C0F1A"/>
-  <!-- border -->
-  <rect x="4" y="4" width="92" height="92" fill="none"
-        stroke="#1E3356" stroke-width="1.2"/>
-  <!-- corner accents -->
-  <path d="M4,14 L4,4 L14,4" fill="none" stroke="#5BC8F5" stroke-width="2.2" stroke-linecap="round"/>
-  <path d="M86,4 L96,4 L96,14" fill="none" stroke="#5BC8F5" stroke-width="2.2" stroke-linecap="round"/>
-  <path d="M4,86 L4,96 L14,96" fill="none" stroke="#5BC8F5" stroke-width="2.2" stroke-linecap="round"/>
-  <path d="M86,96 L96,96 L96,86" fill="none" stroke="#5BC8F5" stroke-width="2.2" stroke-linecap="round"/>
   <!-- ξ -->
   <text x="44" y="72" text-anchor="middle"
         font-family="Georgia,'DejaVu Serif',serif"
-        font-style="italic" font-size="58" fill="#5BC8F5">&#958;</text>
+font-style="italic" font-size="58" fill="#5BC8F5">&#950;</text>
   <!-- superscript 2 -->
   <text x="74" y="38" text-anchor="middle"
         font-family="Georgia,'DejaVu Serif',serif"
