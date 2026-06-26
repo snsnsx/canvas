@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import argparse
 import os
 import subprocess
@@ -8,29 +6,7 @@ import threading
 import time
 import urllib.request
 
-REPO_URL = "https://github.com/snsnsx/canvas.git"
-PROJECT_DIR = "canvas"
 PORT = 8000
-
-
-def clone_repo():
-    if not os.path.isdir(PROJECT_DIR):
-        print("Клонирую репозиторий...")
-        subprocess.run(
-            ["git", "clone", "--depth", "1", REPO_URL, PROJECT_DIR],
-            check=True,
-        )
-    else:
-        print("Репозиторий уже существует — обновляю...")
-        subprocess.run(
-            ["git", "-C", PROJECT_DIR, "pull", "--ff-only"],
-            check=False,
-        )
-
-    os.chdir(PROJECT_DIR)
-
-    print(f"Рабочая папка: {os.getcwd()}")
-
 
 def install_requirements():
     subprocess.run(
