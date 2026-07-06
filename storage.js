@@ -6,7 +6,7 @@ export const SIZE_PRESETS = {                 // пресеты толщины �
   pen:[2,3.5,6], highlighter:[14,22,30], eraser:[16,28,46]
 };
 export const SIZE_DEFAULT = { pen:1, highlighter:1, eraser:1 };  // индексы пресета (S/M/L)
-export const MAX_EXPORT_W = 12000;            // ограничение ширины экспорта
+export const MAX_EXPORT_H = 12000;            // ограничение высоты экспорта
 
 export function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -30,11 +30,11 @@ export class BoardStorage {
     this.sizeIdx = Object.assign({}, SIZE_DEFAULT);
     this.gridType = 'grid';                 // none | grid | dots | lines
 
-    this.strokes = [];                      // [{id, tool, color, size, points:[{x,y}], minX, maxX}]
+    this.strokes = [];                      // [{id, tool, color, size, points:[{x,y}], minY, maxY}]
     this.images  = [];                      // [{id, src, img, x, y, w, h}]
-    this.contentRight = 0;                  // правая граница содержимого (мир)
-    this.cameraX = 0;                       // смещение «камеры» вправо (мир)
-    this.selected = null;                   // выбранное изображение (select)
+    this.contentBottom = 0;                 // нижняя граница содержимого (мир)
+    this.cameraY = 0;                       // смещение «камеры» вниз (мир)
+    this.selected = null;                   // выбранное изображение
     this.dirty = false;
   }
 
@@ -51,7 +51,7 @@ export class BoardStorage {
     return JSON.stringify({
       v: 1,
       grid: this.gridType,
-      contentRight: this.contentRight,
+      contentBottom: this.contentBottom,
       penColors: this.penColors,
       hlColors: this.hlColors,
       strokes: this.strokes.map(s => ({
@@ -117,38 +117,38 @@ export class BoardStorage {
     });
 
     this.selected = null;
-    this.recomputeContentRight();
+    this.recomputeContentBottom();
     return true;
   }
 
-  extendRight(s) {
+  extendBottom(s) {
     if (s.points) {
       for (const p of s.points) {
-        if (p.x > this.contentRight) this.contentRight = p.x;
+        if (p.y > this.contentBottom) this.contentBottom = p.y;
       }
-    } else if (s.x !== undefined && s.w !== undefined) {
-      if (s.x + s.w > this.contentRight) this.contentRight = s.x + s.w;
+    } else if (s.y !== undefined && s.h !== undefined) {
+      if (s.y + s.h > this.contentBottom) this.contentBottom = s.y + s.h;
     }
   }
 
-  recomputeContentRight() {
+  recomputeContentBottom() {
     let m = 0;
     for (const s of this.strokes) {
-      if (s.maxX > m) m = s.maxX;
+      if (s.maxY > m) m = s.maxY;
     }
     for (const im of this.images) {
-      if (im.x + im.w > m) m = im.x + im.w;
+      if (im.y + im.h > m) m = im.y + im.h;
     }
-    this.contentRight = m;
+    this.contentBottom = m;
   }
 
   computeBBox(s) {
-    let mnX = Infinity, mxX = -Infinity;
+    let mnY = Infinity, mxY = -Infinity;
     for (const p of s.points) {
-      if (p.x < mnX) mnX = p.x;
-      if (p.x > mxX) mxX = p.x;
+      if (p.y < mnY) mnY = p.y;
+      if (p.y > mxY) mxY = p.y;
     }
-    s.minX = mnX === Infinity ? 0 : mnX - s.size;
-    s.maxX = mxX === -Infinity ? 0 : mxX + s.size;
+    s.minY = mnY === Infinity ? 0 : mnY - s.size;
+    s.maxY = mxY === -Infinity ? 0 : mxY + s.size;
   }
 }

@@ -11,7 +11,7 @@ export class CanvasRenderer {
     this.backCtx = this.back.getContext('2d');
     this.inkCtx  = this.ink.getContext('2d', { desynchronized: true });
     this.ovCtx   = this.overlay.getContext('2d');
-    this.hbar    = document.getElementById('hbar');
+    this.vbar    = document.getElementById('vbar');
     this.thumb   = document.getElementById('thumb');
 
     // offscreen-кэш зафиксированных штрихов (для текущей камеры)
@@ -58,11 +58,11 @@ export class CanvasRenderer {
   }
 
   maxCamera() {
-    return Math.max(0, this.storage.contentRight + this.W);
+    return Math.max(0, this.storage.contentBottom + this.H);
   }
 
   clampCamera() {
-    this.storage.cameraX = Math.max(0, Math.min(this.storage.cameraX, this.maxCamera()));
+    this.storage.cameraY = Math.max(0, Math.min(this.storage.cameraY, this.maxCamera()));
   }
 
   getCSS(v) {
@@ -72,14 +72,18 @@ export class CanvasRenderer {
     return this.cssCache[v];
   }
 
-  drawGrid(ctx, camX, w, h) {
+  drawGrid(ctx, camY, w, h) {
     if (this.storage.gridType === 'none') return;
     ctx.save();
+
+    const startY = Math.floor(camY / CELL) * CELL;
+
     if (this.storage.gridType === 'lines') {
+      // линейка — горизонтальные линии, прокручиваются по Y
       ctx.strokeStyle = this.getCSS('--grid-strong');
       ctx.lineWidth = 1;
-      for (let y = CELL; y < h; y += CELL) {
-        const yy = Math.round(y) + 0.5;
+      for (let y = startY; y <= camY + h; y += CELL) {
+        const yy = Math.round(y - camY) + 0.5;
         ctx.beginPath();
         ctx.moveTo(0, yy);
         ctx.lineTo(w, yy);
@@ -88,28 +92,30 @@ export class CanvasRenderer {
       ctx.restore();
       return;
     }
-    const startX = Math.floor(camX / CELL) * CELL;
+
     if (this.storage.gridType === 'dots') {
       ctx.fillStyle = this.getCSS('--grid-strong');
-      for (let x = startX; x <= camX + w; x += CELL) {
-        for (let y = 0; y <= h; y += CELL) {
+      for (let y = startY; y <= camY + h; y += CELL) {
+        for (let x = 0; x <= w; x += CELL) {
           ctx.beginPath();
-          ctx.arc(x - camX, y, 1.15, 0, Math.PI * 2);
+          ctx.arc(x, y - camY, 1.15, 0, Math.PI * 2);
           ctx.fill();
         }
       }
     } else { // grid
       ctx.strokeStyle = this.getCSS('--grid');
       ctx.lineWidth = 1;
-      for (let x = startX; x <= camX + w; x += CELL) {
-        const xx = Math.round(x - camX) + 0.5;
+      // вертикальные линии — фиксированы по X
+      for (let x = 0; x <= w; x += CELL) {
+        const xx = Math.round(x) + 0.5;
         ctx.beginPath();
         ctx.moveTo(xx, 0);
         ctx.lineTo(xx, h);
         ctx.stroke();
       }
-      for (let y = 0; y <= h; y += CELL) {
-        const yy = Math.round(y) + 0.5;
+      // горизонтальные линии — прокручиваются по Y
+      for (let y = startY; y <= camY + h; y += CELL) {
+        const yy = Math.round(y - camY) + 0.5;
         ctx.beginPath();
         ctx.moveTo(0, yy);
         ctx.lineTo(w, yy);
@@ -119,7 +125,7 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  drawStrokeTo(ctx, s, camX) {
+  drawStrokeTo(ctx, s, camY) {
     const pts = s.points;
     if (!pts.length) return;
     ctx.save();
@@ -143,23 +149,23 @@ export class CanvasRenderer {
 
     if (pts.length === 1) {
       ctx.beginPath();
-      ctx.arc(getX(pts[0]) - camX, getY(pts[0]), Math.max(0.6, s.size / 2), 0, Math.PI * 2);
+      ctx.arc(getX(pts[0]), getY(pts[0]) - camY, Math.max(0.6, s.size / 2), 0, Math.PI * 2);
       ctx.fill();
     } else {
       ctx.beginPath();
-      ctx.moveTo(getX(pts[0]) - camX, getY(pts[0]));
+      ctx.moveTo(getX(pts[0]), getY(pts[0]) - camY);
       for (let i = 1; i < pts.length - 1; i++) {
         const a = pts[i];
         const b = pts[i+1];
         ctx.quadraticCurveTo(
-          getX(a) - camX,
-          getY(a),
-          (getX(a) + getX(b)) / 2 - camX,
-          (getY(a) + getY(b)) / 2
+          getX(a),
+          getY(a) - camY,
+          (getX(a) + getX(b)) / 2,
+          (getY(a) + getY(b)) / 2 - camY
         );
       }
       const last = pts[pts.length - 1];
-      ctx.lineTo(getX(last) - camX, getY(last));
+      ctx.lineTo(getX(last), getY(last) - camY);
       ctx.stroke();
     }
     ctx.restore();
@@ -167,22 +173,22 @@ export class CanvasRenderer {
 
   renderBack() {
     this.backCtx.clearRect(0, 0, this.W, this.H);
-    this.drawGrid(this.backCtx, this.storage.cameraX, this.W, this.H);
+    this.drawGrid(this.backCtx, this.storage.cameraY, this.W, this.H);
     for (const im of this.storage.images) {
       if (!im.img.complete || !im.img.naturalWidth) continue;
-      if (im.x + im.w < this.storage.cameraX || im.x > this.storage.cameraX + this.W) continue; // culling
-      this.backCtx.drawImage(im.img, im.x - this.storage.cameraX, im.y, im.w, im.h);
+      if (im.y + im.h < this.storage.cameraY || im.y > this.storage.cameraY + this.H) continue; // culling
+      this.backCtx.drawImage(im.img, im.x, im.y - this.storage.cameraY, im.w, im.h);
     }
   }
 
   strokeVisible(s) {
-    return s.maxX >= this.storage.cameraX - 4 && s.minX <= this.storage.cameraX + this.W + 4;
+    return s.maxY >= this.storage.cameraY - 4 && s.minY <= this.storage.cameraY + this.H + 4;
   }
 
   rebuildInkCache() {
     this.cacheCtx.clearRect(0, 0, this.W, this.H);
     for (const s of this.storage.strokes) {
-      if (this.strokeVisible(s)) this.drawStrokeTo(this.cacheCtx, s, this.storage.cameraX);
+      if (this.strokeVisible(s)) this.drawStrokeTo(this.cacheCtx, s, this.storage.cameraY);
     }
   }
 
@@ -196,44 +202,64 @@ export class CanvasRenderer {
 
   renderActive(active) {
     this.blitInk();
-    if (active) this.drawStrokeTo(this.inkCtx, active, this.storage.cameraX);
+    if (active) this.drawStrokeTo(this.inkCtx, active, this.storage.cameraY);
   }
 
   renderOverlay() {
     this.ovCtx.clearRect(0, 0, this.W, this.H);
-    if (this.storage.tool === 'select' && this.storage.selected) {
-      const selected = this.storage.selected;
-      const x = selected.x - this.storage.cameraX, y = selected.y, w = selected.w, h = selected.h;
-      this.ovCtx.save();
-      this.ovCtx.strokeStyle = this.getCSS('--accent');
-      this.ovCtx.lineWidth = 1.5;
-      this.ovCtx.setLineDash([5, 4]);
-      this.ovCtx.strokeRect(x, y, w, h);
-      this.ovCtx.setLineDash([]);
+    const sel = this.storage.selected;
+    if (sel) {
+      const ctx = this.ovCtx;
+      const x = sel.x;
+      const y = sel.y - this.storage.cameraY;
+      const w = sel.w, h = sel.h;
+      const accent = this.getCSS('--accent');
 
-      // resize handle (right-bottom)
-      this.ovCtx.fillStyle = '#fff';
-      this.ovCtx.strokeStyle = this.getCSS('--accent');
-      this.ovCtx.lineWidth = 1.5;
-      this.roundRect(this.ovCtx, x + w - 9, y + h - 9, 18, 18, 4);
-      this.ovCtx.fill();
-      this.ovCtx.stroke();
+      ctx.save();
 
-      // delete button (right-top)
-      this.ovCtx.beginPath();
-      this.ovCtx.arc(x + w, y, 11, 0, Math.PI * 2);
-      this.ovCtx.fillStyle = this.getCSS('--ui-strong');
-      this.ovCtx.fill();
-      this.ovCtx.strokeStyle = '#fff';
-      this.ovCtx.lineWidth = 1.6;
-      this.ovCtx.lineCap = 'round';
-      this.ovCtx.beginPath();
-      this.ovCtx.moveTo(x + w - 4, y - 4);
-      this.ovCtx.lineTo(x + w + 4, y + 4);
-      this.ovCtx.moveTo(x + w + 4, y - 4);
-      this.ovCtx.lineTo(x + w - 4, y + 4);
-      this.ovCtx.stroke();
-      this.ovCtx.restore();
+      // рамка выделения
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+
+      // — ручка изменения размера (правый-нижний угол), крупная —
+      const HR = 11; // половина стороны → 22px, зона касания шире
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2;
+      this.roundRect(ctx, x + w - HR, y + h - HR, HR * 2, HR * 2, 5);
+      ctx.fill();
+      ctx.stroke();
+      // диагональные насечки
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x + w - 4, y + h + 4);
+      ctx.lineTo(x + w + 4, y + h - 4);
+      ctx.moveTo(x + w,     y + h + 4);
+      ctx.lineTo(x + w + 4, y + h);
+      ctx.stroke();
+
+      // — кнопка удаления (правый-верхний угол), крупная —
+      const DR = 12; // радиус → 24px
+      ctx.beginPath();
+      ctx.arc(x + w, y, DR, 0, Math.PI * 2);
+      ctx.fillStyle = this.getCSS('--ui-strong');
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x + w - 4.5, y - 4.5);
+      ctx.lineTo(x + w + 4.5, y + 4.5);
+      ctx.moveTo(x + w + 4.5, y - 4.5);
+      ctx.lineTo(x + w - 4.5, y + 4.5);
+      ctx.stroke();
+
+      ctx.restore();
     }
     this.updateScrollbar();
   }
@@ -256,12 +282,12 @@ export class CanvasRenderer {
   }
 
   updateScrollbar() {
-    const total = this.maxCamera() + this.W;
-    const barW = this.hbar.clientWidth || (this.W - 16);
-    const tw = Math.max(28, barW * (this.W / total));
-    const maxLeft = barW - tw;
-    const left = total <= this.W ? 0 : (this.storage.cameraX / this.maxCamera()) * maxLeft;
-    this.thumb.style.width = tw + 'px';
-    this.thumb.style.left = Math.max(0, Math.min(maxLeft, left)) + 'px';
+    const total = this.maxCamera() + this.H;
+    const barH = this.vbar.clientHeight || (this.H - 16);
+    const th = Math.max(28, barH * (this.H / total));
+    const maxTop = barH - th;
+    const top = total <= this.H ? 0 : (this.storage.cameraY / this.maxCamera()) * maxTop;
+    this.thumb.style.height = th + 'px';
+    this.thumb.style.top = Math.max(0, Math.min(maxTop, top)) + 'px';
   }
 }

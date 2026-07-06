@@ -3,7 +3,7 @@ import {
   DEFAULT_PEN,
   DEFAULT_HL,
   SIZE_PRESETS,
-  MAX_EXPORT_W,
+  MAX_EXPORT_H,
   generateUUID
 } from './storage.js';
 
@@ -19,9 +19,9 @@ export class ToolManager {
     this.penActive = false;
 
     this.panPid = null;
-    this.panStartX = 0;
+    this.panStartY = 0;
     this.panStartCam = 0;
-    this.panLastX = 0;
+    this.panLastY = 0;
     this.panLastT = 0;
     this.panVel = 0;
     this.momRAF = null;
@@ -35,7 +35,7 @@ export class ToolManager {
 
     this.fileInput = document.getElementById('fileInput');
     this.overlay = document.getElementById('overlay');
-    this.hbar = document.getElementById('hbar');
+    this.vbar = document.getElementById('vbar');
     this.thumb = document.getElementById('thumb');
 
     this.init();
@@ -53,12 +53,12 @@ export class ToolManager {
     this.overlay.addEventListener('pointercancel', (e) => this.onUp(e));
     this.overlay.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Wheel/trackpad panning
+    // Wheel/trackpad panning (вертикальная прокрутка)
     this.renderer.stage.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.stopMomentum();
-      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      this.storage.cameraX += d;
+      const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      this.storage.cameraY += d;
       this.renderer.clampCamera();
       this.renderer.fullRender();
       this.showScrollbar();
@@ -197,11 +197,8 @@ export class ToolManager {
     document.querySelectorAll('#gridSeg .btn').forEach(b => {
       b.classList.toggle('on', b.dataset.grid === this.storage.gridType);
     });
-
-    if (this.storage.tool !== 'select' && this.storage.selected) {
-      this.storage.selected = null;
-      this.renderer.renderOverlay();
-    }
+    // Выделение изображения больше не привязано к инструменту «выделение»:
+    // им можно управлять в любом инструменте, поэтому здесь его не сбрасываем.
   }
 
   attachLongPress(el, cb) {
@@ -265,7 +262,7 @@ export class ToolManager {
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (this.storage.tool === 'select' && this.storage.selected) {
+      if (this.storage.selected) {
         e.preventDefault();
         this.deleteSelected();
       }
@@ -278,27 +275,27 @@ export class ToolManager {
       case 'h': this.storage.tool = 'highlighter'; this.syncTools(); break;
       case 'e': this.storage.tool = 'eraser'; this.syncTools(); break;
       case 'v': this.storage.tool = 'select'; this.syncTools(); break;
-      case 'arrowleft':
-        this.storage.cameraX -= 80;
+      case 'arrowup':
+        this.storage.cameraY -= 80;
         this.renderer.clampCamera();
         this.renderer.fullRender();
         this.showScrollbar();
         this.hideScrollbarLater();
         break;
-      case 'arrowright':
-        this.storage.cameraX += 80;
+      case 'arrowdown':
+        this.storage.cameraY += 80;
         this.renderer.clampCamera();
         this.renderer.fullRender();
         this.showScrollbar();
         this.hideScrollbarLater();
         break;
       case 'home':
-        this.storage.cameraX = 0;
+        this.storage.cameraY = 0;
         this.renderer.clampCamera();
         this.renderer.fullRender();
         break;
       case 'end':
-        this.storage.cameraX = this.renderer.maxCamera();
+        this.storage.cameraY = this.renderer.maxCamera();
         this.renderer.clampCamera();
         this.renderer.fullRender();
         break;
@@ -319,22 +316,26 @@ export class ToolManager {
   onDown(e) {
     if (e.pointerType === 'pen') this.penActive = true;
 
+    // Режим «выделение»: перо/мышь управляют изображениями
     if (this.storage.tool === 'select' && this.isDrawingPointer(e)) {
       this.overlay.setPointerCapture(e.pointerId);
-      this.startSelect(e);
+      this.beginImageDrag(e);
       return;
     }
 
+    // Инструменты рисования: перо/мышь рисуют
     if (this.isDrawingPointer(e)) {
       this.overlay.setPointerCapture(e.pointerId);
       this.startStroke(e);
       return;
     }
 
+    // Палец: прямое управление изображением, иначе — панорамирование (в любом инструменте)
     if (e.pointerType === 'touch') {
-      if (this.penActive) return; // Palm rejection
-      if (this.drawPid !== null) return; // Already drawing
+      if (this.penActive) return;                                             // отсечение ладони
+      if (this.drawPid !== null || this.dragPid !== null || this.panPid !== null) return;
       this.overlay.setPointerCapture(e.pointerId);
+      if (this.beginImageDrag(e)) return;                                     // попали в изображение/ручку
       this.startPan(e);
       return;
     }
@@ -365,6 +366,12 @@ export class ToolManager {
   // --- Active Stroke Handlers ---
 
   startStroke(e) {
+    // Рисование снимает выделение изображения
+    if (this.storage.selected) {
+      this.storage.selected = null;
+      this.renderer.renderOverlay();
+    }
+
     this.drawPid = e.pointerId;
     const { sx, sy } = this.pointerPos(e);
     const col = this.storage.tool === 'pen'
@@ -375,16 +382,17 @@ export class ToolManager {
     const sz = SIZE_PRESETS[this.storage.tool][this.storage.sizeIdx[this.storage.tool]];
 
     const strokeId = generateUUID();
+    const wpt = { x: sx, y: sy + this.storage.cameraY };
     this.activeStroke = {
       id: strokeId,
       tool: this.storage.tool,
       color: col,
       size: sz,
-      points: [{ x: sx + this.storage.cameraX, y: sy }]
+      points: [wpt]
     };
 
     // Buffer and stream points
-    this.network.startStroke(strokeId, this.storage.tool, col, sz, { x: sx + this.storage.cameraX, y: sy });
+    this.network.startStroke(strokeId, this.storage.tool, col, sz, wpt);
     this.renderer.renderActive(this.activeStroke);
   }
 
@@ -392,7 +400,7 @@ export class ToolManager {
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     const r = this.overlay.getBoundingClientRect();
     for (const ev of evs) {
-      const pt = { x: (ev.clientX - r.left) + this.storage.cameraX, y: ev.clientY - r.top };
+      const pt = { x: (ev.clientX - r.left), y: (ev.clientY - r.top) + this.storage.cameraY };
       this.activeStroke.points.push(pt);
       this.network.bufferPoint(pt);
     }
@@ -407,9 +415,9 @@ export class ToolManager {
 
       this.network.endStroke(); // Flushes points and closes stroke
 
-      this.renderer.drawStrokeTo(this.renderer.cacheCtx, s, this.storage.cameraX);
+      this.renderer.drawStrokeTo(this.renderer.cacheCtx, s, this.storage.cameraY);
       this.renderer.blitInk();
-      this.storage.extendRight(s);
+      this.storage.extendBottom(s);
 
       // Save to local undo/redo history
       this.history.push({
@@ -422,14 +430,14 @@ export class ToolManager {
     this.drawPid = null;
   }
 
-  // --- Finger Panning with Inertia ---
+  // --- Finger Panning with Inertia (вертикальное) ---
 
   startPan(e) {
     this.stopMomentum();
     this.panPid = e.pointerId;
-    this.panStartX = e.clientX;
-    this.panStartCam = this.storage.cameraX;
-    this.panLastX = e.clientX;
+    this.panStartY = e.clientY;
+    this.panStartCam = this.storage.cameraY;
+    this.panLastY = e.clientY;
     this.panLastT = performance.now();
     this.panVel = 0;
     this.showScrollbar();
@@ -437,12 +445,12 @@ export class ToolManager {
 
   movePan(e) {
     const now = performance.now();
-    this.storage.cameraX = this.panStartCam - (e.clientX - this.panStartX);
+    this.storage.cameraY = this.panStartCam - (e.clientY - this.panStartY);
     this.renderer.clampCamera();
 
     const dt = Math.max(1, now - this.panLastT);
-    this.panVel = -((e.clientX - this.panLastX) / dt); // px/ms
-    this.panLastX = e.clientX;
+    this.panVel = -((e.clientY - this.panLastY) / dt); // px/ms
+    this.panLastY = e.clientY;
     this.panLastT = now;
 
     this.renderer.fullRender();
@@ -461,12 +469,12 @@ export class ToolManager {
       const dt = now - last;
       last = now;
 
-      this.storage.cameraX += this.panVel * dt;
+      this.storage.cameraY += this.panVel * dt;
       this.panVel *= Math.pow(0.94, dt / 16);
 
-      const before = this.storage.cameraX;
+      const before = this.storage.cameraY;
       this.renderer.clampCamera();
-      if (before !== this.storage.cameraX) this.panVel = 0;
+      if (before !== this.storage.cameraY) this.panVel = 0;
 
       this.renderer.fullRender();
 
@@ -487,10 +495,10 @@ export class ToolManager {
     }
   }
 
-  // --- Scrollbar Handling ---
+  // --- Scrollbar Handling (вертикальный) ---
 
   showScrollbar() {
-    this.hbar.classList.add('show');
+    this.vbar.classList.add('show');
     if (this.sbTimer) {
       clearTimeout(this.sbTimer);
       this.sbTimer = null;
@@ -499,7 +507,7 @@ export class ToolManager {
 
   hideScrollbarLater() {
     if (this.sbTimer) clearTimeout(this.sbTimer);
-    this.sbTimer = setTimeout(() => this.hbar.classList.remove('show'), 900);
+    this.sbTimer = setTimeout(() => this.vbar.classList.remove('show'), 900);
   }
 
   initScrollbarDrag() {
@@ -510,18 +518,18 @@ export class ToolManager {
       this.stopMomentum();
 
       id = e.pointerId;
-      grab = e.clientX - this.thumb.getBoundingClientRect().left;
+      grab = e.clientY - this.thumb.getBoundingClientRect().top;
       this.thumb.setPointerCapture(id);
       this.showScrollbar();
     });
     this.thumb.addEventListener('pointermove', e => {
       if (e.pointerId !== id) return;
-      const barRect = this.hbar.getBoundingClientRect();
-      const tw = this.thumb.offsetWidth;
-      const maxLeft = barRect.width - tw;
-      let left = Math.max(0, Math.min(maxLeft, e.clientX - barRect.left - grab));
+      const barRect = this.vbar.getBoundingClientRect();
+      const th = this.thumb.offsetHeight;
+      const maxTop = barRect.height - th;
+      let top = Math.max(0, Math.min(maxTop, e.clientY - barRect.top - grab));
 
-      this.storage.cameraX = this.renderer.maxCamera() * (left / (maxLeft || 1));
+      this.storage.cameraY = this.renderer.maxCamera() * (top / (maxTop || 1));
       this.renderer.clampCamera();
       this.renderer.fullRender();
     });
@@ -543,59 +551,72 @@ export class ToolManager {
     return null;
   }
 
-  startSelect(e) {
-    this.dragPid = e.pointerId;
+  // Возвращает true, если палец/курсор задел изображение или его ручку
+  // (и захватил его для перетаскивания / изменения размера / удаления),
+  // false — если попали в пустое место (снимаем выделение, можно панорамировать).
+  beginImageDrag(e) {
     const { sx, sy } = this.pointerPos(e);
-    const wx = sx + this.storage.cameraX;
-    const wy = sy;
+    const wx = sx;
+    const wy = sy + this.storage.cameraY;
 
+    // Ручки текущего выделения (в экранных координатах)
     if (this.storage.selected) {
-      const selected = this.storage.selected;
-      const x = selected.x - this.storage.cameraX, y = selected.y, w = selected.w, h = selected.h;
+      const s = this.storage.selected;
+      const bx = s.x, by = s.y - this.storage.cameraY, bw = s.w, bh = s.h;
 
-      // Delete button check
-      if (Math.hypot(sx - (x + w), sy - y) <= 13) {
+      // Кнопка удаления (правый-верхний угол), крупная зона касания
+      if (Math.hypot(sx - (bx + bw), sy - by) <= 16) {
         this.deleteSelected();
         this.dragPid = null;
-        return;
+        this.dragMode = null;
+        return true;
       }
 
-      // Resize handle check
-      if (sx >= x + w - 12 && sx <= x + w + 8 && sy >= y + h - 12 && sy <= y + h + 8) {
+      // Ручка изменения размера (правый-нижний угол), крупная зона касания
+      if (sx >= bx + bw - 16 && sx <= bx + bw + 16 && sy >= by + bh - 16 && sy <= by + bh + 16) {
+        this.dragPid = e.pointerId;
         this.dragMode = 'resize';
-        this.dragStart = { x: selected.x, y: selected.y, w: selected.w, h: selected.h };
-        return;
+        this.dragStart = { x: s.x, y: s.y, w: s.w, h: s.h };
+        return true;
       }
     }
 
+    // Попадание по изображению → выбрать и начать перемещение
     const im = this.hitImage(wx, wy);
     if (im) {
       this.storage.selected = im;
+      this.dragPid = e.pointerId;
       this.dragMode = 'move';
       this.dragOff = { x: wx - im.x, y: wy - im.y };
       this.dragStart = { x: im.x, y: im.y, w: im.w, h: im.h };
       this.renderer.fullRender();
-    } else {
-      if (this.storage.selected) {
-        this.storage.selected = null;
-        this.renderer.renderOverlay();
-      }
-      this.dragMode = null;
-      this.dragPid = null;
+      return true;
     }
+
+    // Пустое место → снять выделение
+    if (this.storage.selected) {
+      this.storage.selected = null;
+      this.renderer.renderOverlay();
+    }
+    this.dragMode = null;
+    return false;
   }
 
   moveSelect(e) {
     const { sx, sy } = this.pointerPos(e);
-    const wx = sx + this.storage.cameraX;
-    const wy = sy;
+    const wx = sx;
+    const wy = sy + this.storage.cameraY;
 
     if (this.dragMode === 'move') {
       this.storage.selected.x = wx - this.dragOff.x;
       this.storage.selected.y = wy - this.dragOff.y;
     } else if (this.dragMode === 'resize') {
+      // Пропорциональное изменение от левого-верхнего угла;
+      // угол следует и за горизонтальным, и за вертикальным перемещением.
       const aspect = this.dragStart.w / this.dragStart.h;
-      let nw = Math.max(24, wx - this.storage.selected.x);
+      const dw = wx - this.storage.selected.x;
+      const dh = wy - this.storage.selected.y;
+      const nw = Math.max(24, Math.max(dw, dh * aspect));
       this.storage.selected.w = nw;
       this.storage.selected.h = nw / aspect;
     }
@@ -611,7 +632,7 @@ export class ToolManager {
       const after = { x: im.x, y: im.y, w: im.w, h: im.h };
 
       if (before.x !== after.x || before.y !== after.y || before.w !== after.w) {
-        this.storage.recomputeContentRight();
+        this.storage.recomputeContentBottom();
 
         // Push local history action
         this.history.push({
@@ -647,7 +668,7 @@ export class ToolManager {
 
     this.storage.images.splice(idx, 1);
     this.storage.selected = null;
-    this.storage.recomputeContentRight();
+    this.storage.recomputeContentBottom();
     this.renderer.fullRender();
 
     // Broadcast delete event
@@ -670,28 +691,27 @@ export class ToolManager {
   addImage(src) {
     const img = new Image();
     img.onload = () => {
-      const maxW = Math.min(this.renderer.W * 0.8, img.naturalWidth);
+      const maxW = Math.min(this.renderer.W * 0.9, img.naturalWidth);
       const sc = Math.min(maxW / img.naturalWidth, (this.renderer.H * 0.72) / img.naturalHeight, 1);
+      const iw = img.naturalWidth * sc;
+      const ih = img.naturalHeight * sc;
 
       const imageId = generateUUID();
       const im = {
         id: imageId,
         src,
         img,
-        x: this.storage.cameraX + 24,
-        y: 24,
-        w: img.naturalWidth * sc,
-        h: img.naturalHeight * sc
+        x: Math.max(12, (this.renderer.W - iw) / 2),   // по центру по горизонтали
+        y: this.storage.cameraY + 24,                  // у верхнего края видимой области
+        w: iw,
+        h: ih
       };
 
       this.storage.images.push(im);
-      this.storage.selected = im;
-      this.storage.tool = 'select';
+      this.storage.selected = im;   // сразу выбрано — видны ручки, можно двигать/масштабировать
       this.syncTools();
 
-      if (im.x + im.w > this.storage.contentRight) {
-        this.storage.contentRight = im.x + im.w;
-      }
+      this.storage.extendBottom(im);
       this.renderer.fullRender();
 
       // Broadcast image creation
@@ -730,8 +750,8 @@ export class ToolManager {
     this.storage.strokes = [];
     this.storage.images = [];
     this.storage.selected = null;
-    this.storage.contentRight = 0;
-    this.storage.cameraX = 0;
+    this.storage.contentBottom = 0;
+    this.storage.cameraY = 0;
     this.renderer.fullRender();
 
     // Broadcast clear event
@@ -747,13 +767,14 @@ export class ToolManager {
     });
   }
 
-  // --- Export PNG ---
+  // --- Export PNG (растёт в высоту) ---
 
   exportPNG() {
     const margin = 40;
-    const fullW = Math.max(this.renderer.W, Math.ceil(this.storage.contentRight) + margin);
-    const scale = Math.min(1, MAX_EXPORT_W / fullW);
-    const outW = Math.round(fullW * scale), outH = Math.round(this.renderer.H * scale);
+    const fullW = this.renderer.W;
+    const fullH = Math.max(this.renderer.H, Math.ceil(this.storage.contentBottom) + margin);
+    const scale = Math.min(1, MAX_EXPORT_H / fullH);
+    const outW = Math.round(fullW * scale), outH = Math.round(fullH * scale);
 
     // bg + grid + images
     const bg = document.createElement('canvas');
@@ -762,9 +783,9 @@ export class ToolManager {
     const bx = bg.getContext('2d');
     bx.scale(scale, scale);
     bx.fillStyle = '#ffffff';
-    bx.fillRect(0, 0, fullW, this.renderer.H);
+    bx.fillRect(0, 0, fullW, fullH);
 
-    this.renderer.drawGrid(bx, 0, fullW, this.renderer.H);
+    this.renderer.drawGrid(bx, 0, fullW, fullH);
     for (const im of this.storage.images) {
       if (im.img.complete && im.img.naturalWidth) {
         bx.drawImage(im.img, im.x, im.y, im.w, im.h);
@@ -781,7 +802,7 @@ export class ToolManager {
       this.renderer.drawStrokeTo(ix, s, 0);
     }
 
-    bx.drawImage(il, 0, 0, fullW, this.renderer.H);
+    bx.drawImage(il, 0, 0, fullW, fullH);
 
     bg.toBlob(blob => {
       const url = URL.createObjectURL(blob);

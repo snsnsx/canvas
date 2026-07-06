@@ -122,7 +122,7 @@ export class HistoryManager {
     }
 
     this.redoStack.push(action);
-    this.storage.recomputeContentRight();
+    this.storage.recomputeContentBottom();
     this.updateUI();
     this.onStateChanged();
 
@@ -208,7 +208,7 @@ export class HistoryManager {
     }
 
     this.undoStack.push(action);
-    this.storage.recomputeContentRight();
+    this.storage.recomputeContentBottom();
     this.updateUI();
     this.onStateChanged();
 

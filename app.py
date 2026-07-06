@@ -39,7 +39,7 @@ class BoardState:
         self.board_id = board_id
         self.v = 1
         self.grid = "grid"
-        self.contentRight = 0.0
+        self.contentBottom = 0.0
         self.penColors = ["#1f1f42", "#dc2626", "#14992f"]
         self.hlColors = ["#fde047", "#86efac"]
         self.objects = {}  # UUID -> dict (stroke or image)
@@ -48,7 +48,7 @@ class BoardState:
     def load_from_dict(self, data: dict):
         self.v = data.get("v", 1)
         self.grid = data.get("grid", "grid")
-        self.contentRight = float(data.get("contentRight", 0.0))
+        self.contentBottom = float(data.get("contentBottom", 0.0))
         self.penColors = data.get("penColors", ["#1f1f42", "#dc2626", "#14992f"])
         self.hlColors = data.get("hlColors", ["#fde047", "#86efac"])
         self.version = int(data.get("version", self.version))
@@ -88,6 +88,9 @@ class BoardState:
                 "h": float(im.get("h", 100))
             }
 
+        # Пересчёт по фактическим объектам: чинит старые доски и вертикальную границу.
+        self.recompute_content_bottom()
+
     def to_dict(self) -> dict:
         strokes_list = []
         images_list = []
@@ -112,7 +115,7 @@ class BoardState:
         return {
             "v": self.v,
             "grid": self.grid,
-            "contentRight": self.contentRight,
+            "contentBottom": self.contentBottom,
             "penColors": self.penColors,
             "hlColors": self.hlColors,
             "strokes": strokes_list,
@@ -170,7 +173,7 @@ class BoardState:
             self.grid = payload["grid"]
         elif op_type == "clearBoard":
             self.objects.clear()
-            self.contentRight = 0
+            self.contentBottom = 0
         elif op_type == "undo":
             if "inverseOp" in payload:
                 inner = payload["inverseOp"]
@@ -180,19 +183,19 @@ class BoardState:
                 inner = payload["op"]
                 self.apply_operation(inner["type"], inner["payload"])
 
-        self.recompute_content_right()
+        self.recompute_content_bottom()
 
-    def recompute_content_right(self):
+    def recompute_content_bottom(self):
         m = 0.0
         for obj in self.objects.values():
             if obj["type"] == "stroke":
                 points = obj.get("points", [])
                 if points:
-                    mx = max(p["x"] if isinstance(p, dict) else p[0] for p in points)
-                    m = max(m, mx + obj.get("size", 0.0))
+                    my = max(p["y"] if isinstance(p, dict) else p[1] for p in points)
+                    m = max(m, my + obj.get("size", 0.0))
             elif obj["type"] == "image":
-                m = max(m, obj.get("x", 0.0) + obj.get("w", 0.0))
-        self.contentRight = m
+                m = max(m, obj.get("y", 0.0) + obj.get("h", 0.0))
+        self.contentBottom = m
 
 class BoardManager:
     def __init__(self):

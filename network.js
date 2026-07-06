@@ -229,7 +229,7 @@ export class NetworkManager {
           const newPts = payload.points.map(p => ({ x: p[0], y: p[1] }));
           stroke.points.push(...newPts);
           this.storage.computeBBox(stroke);
-          this.storage.extendRight(stroke);
+          this.storage.extendBottom(stroke);
         }
         break;
       }
@@ -248,7 +248,7 @@ export class NetworkManager {
             this.storage.images.splice(iIdx, 1);
           }
         }
-        this.storage.recomputeContentRight();
+        this.storage.recomputeContentBottom();
         break;
       }
       case 'restoreObject': {
@@ -289,7 +289,7 @@ export class NetworkManager {
             this.storage.images.push(img);
           }
         }
-        this.storage.recomputeContentRight();
+        this.storage.recomputeContentBottom();
         break;
       }
       case 'moveObject': {
@@ -300,7 +300,7 @@ export class NetworkManager {
           img.y = payload.y;
           if (payload.w) img.w = payload.w;
           if (payload.h) img.h = payload.h;
-          this.storage.recomputeContentRight();
+          this.storage.recomputeContentBottom();
         }
         break;
       }
@@ -318,7 +318,7 @@ export class NetworkManager {
         img.img.onload = () => this.onMessageReceived();
         img.img.src = payload.src;
         this.storage.images.push(img);
-        this.storage.extendRight(img);
+        this.storage.extendBottom(img);
         break;
       }
       case 'changeGrid': {
@@ -329,8 +329,8 @@ export class NetworkManager {
         this.storage.strokes = [];
         this.storage.images = [];
         this.storage.selected = null;
-        this.storage.contentRight = 0;
-        this.storage.cameraX = 0;
+        this.storage.contentBottom = 0;
+        this.storage.cameraY = 0;
         break;
       }
       case 'undo': {
