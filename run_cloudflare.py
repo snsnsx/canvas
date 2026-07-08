@@ -1,3 +1,4 @@
+import argparse
 import os
 import subprocess
 import sys
@@ -16,10 +17,12 @@ def install_requirements():
 
 
 def install_cloudflared():
+    """Скачивает cloudflared при отсутствии."""
+
     if os.path.exists("cloudflared"):
         return
 
-    print("Скачиваю cloudflared...")
+    print("Устанавливаю cloudflared...")
 
     subprocess.run(
         [
@@ -32,7 +35,10 @@ def install_cloudflared():
         check=True,
     )
 
-    subprocess.run(["chmod", "+x", "cloudflared"], check=True)
+    subprocess.run(
+        ["chmod", "+x", "cloudflared"],
+        check=True,
+    )
 
 
 def start_server():
@@ -77,36 +83,57 @@ def wait_until_ready(errors, timeout=40):
                 f"http://127.0.0.1:{PORT}/",
                 timeout=2,
             ) as r:
+
                 if r.status == 200:
                     return
+
         except Exception:
             time.sleep(0.5)
 
     raise RuntimeError("FastAPI не запустился.")
 
 
-def start_cloudflare():
-    if not os.path.exists("config.yml"):
-        raise FileNotFoundError(
-            "Не найден config.yml."
-        )
-
+def start_cloudflare(token):
     print("Запускаю Cloudflare Tunnel...")
 
     proc = subprocess.Popen(
         [
             "./cloudflared",
             "tunnel",
-            "--config",
-            "config.yml",
             "run",
-        ]
+            "--token",
+            token,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
 
     return proc
 
 
+def print_logs(proc):
+    """Выводит журнал cloudflared."""
+
+    while True:
+        line = proc.stdout.readline()
+
+        if not line:
+            break
+
+        print("[cloudflared]", line.rstrip())
+
+
 def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "token",
+        help="Cloudflare Tunnel Token",
+    )
+
+    args = parser.parse_args()
+
     install_requirements()
 
     install_cloudflared()
@@ -117,23 +144,38 @@ def main():
 
     print(f"Локальный сервер работает: http://127.0.0.1:{PORT}")
 
-    cloudflare = start_cloudflare()
+    cloudflare = start_cloudflare(args.token)
 
-    print("\n========================================")
+    threading.Thread(
+        target=print_logs,
+        args=(cloudflare,),
+        daemon=True,
+    ).start()
+
+    print()
+    print("=" * 60)
     print("Cloudflare Tunnel запущен.")
-    print("Откройте ваш Public Hostname, настроенный")
+    print("Откройте домен, который привязан к этому Tunnel")
     print("в панели Cloudflare.")
-    print("========================================\n")
+    print("=" * 60)
+    print()
 
     try:
         while True:
-            time.sleep(3600)
+            if cloudflare.poll() is not None:
+                raise RuntimeError("Cloudflare Tunnel завершился.")
+
+            time.sleep(5)
 
     except KeyboardInterrupt:
         print("\nОстановка...")
 
         cloudflare.terminate()
-        cloudflare.wait()
+
+        try:
+            cloudflare.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            cloudflare.kill()
 
 
 if __name__ == "__main__":
