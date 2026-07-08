@@ -1,5 +1,6 @@
 import {
   CELL,
+  BOARD_W,
   DEFAULT_PEN,
   DEFAULT_HL,
   SIZE_PRESETS,
@@ -37,6 +38,8 @@ export class ToolManager {
     this.overlay = document.getElementById('overlay');
     this.vbar = document.getElementById('vbar');
     this.thumb = document.getElementById('thumb');
+    this.stage = this.renderer.stage;
+    this.eraserCursor = document.getElementById('eraserCursor');
 
     this.init();
   }
@@ -51,16 +54,22 @@ export class ToolManager {
     this.overlay.addEventListener('pointermove', (e) => this.onMove(e));
     this.overlay.addEventListener('pointerup', (e) => this.onUp(e));
     this.overlay.addEventListener('pointercancel', (e) => this.onUp(e));
+    this.overlay.addEventListener('pointerleave', () => {
+      this.hideEraserCursor();
+      this.network.sendCursorLeave();
+    });
     this.overlay.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // Wheel/trackpad panning (вертикальная прокрутка)
     this.renderer.stage.addEventListener('wheel', (e) => {
       e.preventDefault();
+      this.network.pauseAutoFocus();
+      this.renderer.stopFocus();
       this.stopMomentum();
       const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-      this.storage.cameraY += d;
+      this.storage.cameraY += d / this.renderer.scale;
       this.renderer.clampCamera();
-      this.renderer.fullRender();
+      this.renderer.scheduleRender();
       this.showScrollbar();
       this.hideScrollbarLater();
     }, { passive: false });
@@ -68,10 +77,6 @@ export class ToolManager {
     // Buttons
     document.getElementById('eraserBtn').addEventListener('click', () => {
       this.storage.tool = 'eraser';
-      this.syncTools();
-    });
-    document.getElementById('selectBtn').addEventListener('click', () => {
-      this.storage.tool = 'select';
       this.syncTools();
     });
     document.querySelectorAll('#gridSeg .btn').forEach(b => {
@@ -104,6 +109,37 @@ export class ToolManager {
       this.fileInput.value = '';
     });
 
+    // Вставка изображений: drag-and-drop файлов на холст
+    window.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') >= 0) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    window.addEventListener('drop', (e) => {
+      if (!e.dataTransfer) return;
+      const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.indexOf('image/') === 0);
+      if (!files.length) return;
+      e.preventDefault();
+      this.addImageFiles(files, this.clientToWorld(e.clientX, e.clientY));
+    });
+
+    // Вставка изображений: Cmd/Ctrl+V из буфера обмена
+    window.addEventListener('paste', (e) => {
+      if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      const files = [];
+      for (const it of items) {
+        if (it.kind === 'file' && it.type.indexOf('image/') === 0) {
+          const f = it.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (!files.length) return;
+      e.preventDefault();
+      this.addImageFiles(files);   // без точки — по центру видимой области
+    });
+
     // Keyboard
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
 
@@ -131,6 +167,8 @@ export class ToolManager {
       const b = document.createElement('button');
       b.className = 'swatch';
       b.title = `Ручка — цвет ${i + 1} (удержание — сменить)`;
+      b.setAttribute('aria-label', `Ручка, цвет ${i + 1}`);
+      b.setAttribute('aria-pressed', 'false');
       b.innerHTML = `<span class="dot" style="background:${c}"></span>`;
       b.addEventListener('click', () => {
         this.storage.tool = 'pen';
@@ -145,6 +183,8 @@ export class ToolManager {
       const b = document.createElement('button');
       b.className = 'swatch hl';
       b.title = `Маркер — цвет ${i + 1} (удержание — сменить)`;
+      b.setAttribute('aria-label', `Маркер, цвет ${i + 1}`);
+      b.setAttribute('aria-pressed', 'false');
       b.innerHTML = `<span class="dot" style="background:${c}"></span>`;
       b.addEventListener('click', () => {
         this.storage.tool = 'highlighter';
@@ -164,6 +204,9 @@ export class ToolManager {
       const b = document.createElement('button');
       b.className = 'size';
       b.dataset.i = i;
+      b.title = ['Тонко', 'Средне', 'Толсто'][i];
+      b.setAttribute('aria-label', `Толщина: ${['тонко', 'средне', 'толсто'][i]}`);
+      b.setAttribute('aria-pressed', 'false');
       b.innerHTML = `<span class="pip" style="width:${px}px;height:${px}px"></span>`;
       b.addEventListener('click', () => {
         const t = (this.storage.tool === 'select') ? 'pen' : this.storage.tool;
@@ -179,24 +222,35 @@ export class ToolManager {
 
   syncTools() {
     document.querySelectorAll('#penColors .swatch').forEach((b, i) => {
-      b.classList.toggle('sel', this.storage.tool === 'pen' && i === this.storage.penIdx);
+      const selected = this.storage.tool === 'pen' && i === this.storage.penIdx;
+      b.classList.toggle('sel', selected);
+      b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
     document.querySelectorAll('#hlColors .swatch').forEach((b, i) => {
-      b.classList.toggle('sel', this.storage.tool === 'highlighter' && i === this.storage.hlIdx);
+      const selected = this.storage.tool === 'highlighter' && i === this.storage.hlIdx;
+      b.classList.toggle('sel', selected);
+      b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
 
     const eraserBtn = document.getElementById('eraserBtn');
-    const selectBtn = document.getElementById('selectBtn');
-    if (eraserBtn) eraserBtn.classList.toggle('on', this.storage.tool === 'eraser');
-    if (selectBtn) selectBtn.classList.toggle('on', this.storage.tool === 'select');
+    if (eraserBtn) {
+      const selected = this.storage.tool === 'eraser';
+      eraserBtn.classList.toggle('on', selected);
+      eraserBtn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
 
     const st = (this.storage.tool === 'select') ? 'pen' : this.storage.tool;
     document.querySelectorAll('#sizes .size').forEach((b, i) => {
-      b.classList.toggle('sel', i === this.storage.sizeIdx[st]);
+      const selected = i === this.storage.sizeIdx[st];
+      b.classList.toggle('sel', selected);
+      b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
     document.querySelectorAll('#gridSeg .btn').forEach(b => {
-      b.classList.toggle('on', b.dataset.grid === this.storage.gridType);
+      const selected = b.dataset.grid === this.storage.gridType;
+      b.classList.toggle('on', selected);
+      b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
+    if (this.storage.tool !== 'eraser') this.hideEraserCursor();
     // Выделение изображения больше не привязано к инструменту «выделение»:
     // им можно управлять в любом инструменте, поэтому здесь его не сбрасываем.
   }
@@ -274,30 +328,37 @@ export class ToolManager {
       case 'p': this.storage.tool = 'pen'; this.syncTools(); break;
       case 'h': this.storage.tool = 'highlighter'; this.syncTools(); break;
       case 'e': this.storage.tool = 'eraser'; this.syncTools(); break;
-      case 'v': this.storage.tool = 'select'; this.syncTools(); break;
       case 'arrowup':
-        this.storage.cameraY -= 80;
+        this.network.pauseAutoFocus();
+        this.renderer.stopFocus();
+        this.storage.cameraY -= 80 / this.renderer.scale;
         this.renderer.clampCamera();
-        this.renderer.fullRender();
+        this.renderer.scheduleRender();
         this.showScrollbar();
         this.hideScrollbarLater();
         break;
       case 'arrowdown':
-        this.storage.cameraY += 80;
+        this.network.pauseAutoFocus();
+        this.renderer.stopFocus();
+        this.storage.cameraY += 80 / this.renderer.scale;
         this.renderer.clampCamera();
-        this.renderer.fullRender();
+        this.renderer.scheduleRender();
         this.showScrollbar();
         this.hideScrollbarLater();
         break;
       case 'home':
+        this.network.pauseAutoFocus();
+        this.renderer.stopFocus();
         this.storage.cameraY = 0;
         this.renderer.clampCamera();
-        this.renderer.fullRender();
+        this.renderer.scheduleRender();
         break;
       case 'end':
+        this.network.pauseAutoFocus();
+        this.renderer.stopFocus();
         this.storage.cameraY = this.renderer.maxCamera();
         this.renderer.clampCamera();
-        this.renderer.fullRender();
+        this.renderer.scheduleRender();
         break;
     }
   }
@@ -309,12 +370,31 @@ export class ToolManager {
     return { sx: e.clientX - r.left, sy: e.clientY - r.top };
   }
 
+  pointerWorld(e) {
+    const { sx, sy } = this.pointerPos(e);
+    return {
+      x: sx / this.renderer.scale,
+      y: sy / this.renderer.scale + this.storage.cameraY
+    };
+  }
+
   isDrawingPointer(e) {
     return e.pointerType === 'pen' || e.pointerType === 'mouse';
   }
 
+  sendIdleCursor(e) {
+    if (!this.isDrawingPointer(e)) return;
+    if (this.drawPid !== null || this.dragPid !== null || this.panPid !== null) return;
+    if (e.buttons && e.buttons !== 0) return;
+    this.network.sendCursor(this.pointerWorld(e));
+  }
+
   onDown(e) {
+    this.network.pauseAutoFocus();
+    this.renderer.stopFocus();
     if (e.pointerType === 'pen') this.penActive = true;
+    this.updateEraserCursor(e);
+    if (this.isDrawingPointer(e)) this.network.sendCursorLeave();
 
     // Режим «выделение»: перо/мышь управляют изображениями
     if (this.storage.tool === 'select' && this.isDrawingPointer(e)) {
@@ -342,6 +422,7 @@ export class ToolManager {
   }
 
   onMove(e) {
+    this.updateEraserCursor(e);
     if (e.pointerId === this.drawPid && this.activeStroke) {
       this.extendStroke(e);
       return;
@@ -354,6 +435,7 @@ export class ToolManager {
       this.moveSelect(e);
       return;
     }
+    this.sendIdleCursor(e);
   }
 
   onUp(e) {
@@ -361,11 +443,13 @@ export class ToolManager {
     if (e.pointerId === this.drawPid) this.endStroke();
     if (e.pointerId === this.panPid) this.endPan();
     if (e.pointerId === this.dragPid) this.endSelect();
+    this.sendIdleCursor(e);
   }
 
   // --- Active Stroke Handlers ---
 
   startStroke(e) {
+    this.network.pauseAutoFocus();
     // Рисование снимает выделение изображения
     if (this.storage.selected) {
       this.storage.selected = null;
@@ -382,7 +466,11 @@ export class ToolManager {
     const sz = SIZE_PRESETS[this.storage.tool][this.storage.sizeIdx[this.storage.tool]];
 
     const strokeId = generateUUID();
-    const wpt = { x: sx, y: sy + this.storage.cameraY };
+    const wpt = {
+      x: sx / this.renderer.scale,
+      y: sy / this.renderer.scale + this.storage.cameraY,
+      pressure: this.pointerPressure(e)
+    };
     this.activeStroke = {
       id: strokeId,
       tool: this.storage.tool,
@@ -391,20 +479,35 @@ export class ToolManager {
       points: [wpt]
     };
 
+    // Активный штрих виден плановым рендерам, пока не завершён
+    this.renderer.activeStroke = this.activeStroke;
+
     // Buffer and stream points
     this.network.startStroke(strokeId, this.storage.tool, col, sz, wpt);
     this.renderer.renderActive(this.activeStroke);
   }
 
   extendStroke(e) {
+    this.network.pauseAutoFocus(1200);
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     const r = this.overlay.getBoundingClientRect();
+    const k = this.renderer.scale;
     for (const ev of evs) {
-      const pt = { x: (ev.clientX - r.left), y: (ev.clientY - r.top) + this.storage.cameraY };
+      const pt = {
+        x: (ev.clientX - r.left) / k,
+        y: (ev.clientY - r.top) / k + this.storage.cameraY,
+        pressure: this.pointerPressure(ev)
+      };
       this.activeStroke.points.push(pt);
       this.network.bufferPoint(pt);
     }
     this.renderer.renderActive(this.activeStroke);
+  }
+
+  pointerPressure(e) {
+    if (e.pointerType !== 'pen') return undefined;
+    if (!Number.isFinite(e.pressure) || e.pressure <= 0) return undefined;
+    return Math.max(0.05, Math.min(1, e.pressure));
   }
 
   endStroke() {
@@ -425,15 +528,19 @@ export class ToolManager {
         id: s.id,
         stroke: s
       });
+      this.network.sendCursor(s.points[s.points.length - 1]);
     }
     this.activeStroke = null;
+    this.renderer.activeStroke = null;
     this.drawPid = null;
   }
 
   // --- Finger Panning with Inertia (вертикальное) ---
 
   startPan(e) {
+    this.network.pauseAutoFocus();
     this.stopMomentum();
+    this.renderer.stopFocus();
     this.panPid = e.pointerId;
     this.panStartY = e.clientY;
     this.panStartCam = this.storage.cameraY;
@@ -444,16 +551,18 @@ export class ToolManager {
   }
 
   movePan(e) {
+    this.network.pauseAutoFocus(1200);
     const now = performance.now();
-    this.storage.cameraY = this.panStartCam - (e.clientY - this.panStartY);
+    const k = this.renderer.scale;
+    this.storage.cameraY = this.panStartCam - (e.clientY - this.panStartY) / k;
     this.renderer.clampCamera();
 
     const dt = Math.max(1, now - this.panLastT);
-    this.panVel = -((e.clientY - this.panLastY) / dt); // px/ms
+    this.panVel = -((e.clientY - this.panLastY) / dt) / k; // мировых px/ms
     this.panLastY = e.clientY;
     this.panLastT = now;
 
-    this.renderer.fullRender();
+    this.renderer.scheduleRender();
   }
 
   endPan() {
@@ -510,11 +619,38 @@ export class ToolManager {
     this.sbTimer = setTimeout(() => this.vbar.classList.remove('show'), 900);
   }
 
+  // --- Eraser Cursor (кольцо, показывающее размер и положение ластика) ---
+
+  updateEraserCursor(e) {
+    const show = this.storage.tool === 'eraser'
+      && (e.pointerType === 'mouse' || e.pointerType === 'pen');
+    if (!show) { this.hideEraserCursor(); return; }
+    if (!this.eraserCursor) return;
+
+    const { sx, sy } = this.pointerPos(e);
+    const worldSize = SIZE_PRESETS.eraser[this.storage.sizeIdx.eraser];
+    const d = Math.max(6, worldSize * this.renderer.scale);   // диаметр в экранных px
+    const c = this.eraserCursor;
+    c.style.width = d + 'px';
+    c.style.height = d + 'px';
+    c.style.left = sx + 'px';
+    c.style.top = sy + 'px';
+    c.classList.add('show');
+    this.stage.classList.add('erase');
+  }
+
+  hideEraserCursor() {
+    if (this.eraserCursor) this.eraserCursor.classList.remove('show');
+    if (this.stage) this.stage.classList.remove('erase');
+  }
+
   initScrollbarDrag() {
     let id = null, grab = 0;
     this.thumb.addEventListener('pointerdown', e => {
       e.preventDefault();
       e.stopPropagation();
+      this.network.pauseAutoFocus();
+      this.renderer.stopFocus();
       this.stopMomentum();
 
       id = e.pointerId;
@@ -524,6 +660,7 @@ export class ToolManager {
     });
     this.thumb.addEventListener('pointermove', e => {
       if (e.pointerId !== id) return;
+      this.network.pauseAutoFocus(1200);
       const barRect = this.vbar.getBoundingClientRect();
       const th = this.thumb.offsetHeight;
       const maxTop = barRect.height - th;
@@ -531,7 +668,7 @@ export class ToolManager {
 
       this.storage.cameraY = this.renderer.maxCamera() * (top / (maxTop || 1));
       this.renderer.clampCamera();
-      this.renderer.fullRender();
+      this.renderer.scheduleRender();
     });
     this.thumb.addEventListener('pointerup', e => {
       if (e.pointerId === id) {
@@ -556,13 +693,14 @@ export class ToolManager {
   // false — если попали в пустое место (снимаем выделение, можно панорамировать).
   beginImageDrag(e) {
     const { sx, sy } = this.pointerPos(e);
-    const wx = sx;
-    const wy = sy + this.storage.cameraY;
+    const k = this.renderer.scale;
+    const wx = sx / k;
+    const wy = sy / k + this.storage.cameraY;
 
-    // Ручки текущего выделения (в экранных координатах)
+    // Ручки текущего выделения — в экранных координатах (мир → экран через scale)
     if (this.storage.selected) {
       const s = this.storage.selected;
-      const bx = s.x, by = s.y - this.storage.cameraY, bw = s.w, bh = s.h;
+      const bx = s.x * k, by = (s.y - this.storage.cameraY) * k, bw = s.w * k, bh = s.h * k;
 
       // Кнопка удаления (правый-верхний угол), крупная зона касания
       if (Math.hypot(sx - (bx + bw), sy - by) <= 16) {
@@ -604,8 +742,9 @@ export class ToolManager {
 
   moveSelect(e) {
     const { sx, sy } = this.pointerPos(e);
-    const wx = sx;
-    const wy = sy + this.storage.cameraY;
+    const k = this.renderer.scale;
+    const wx = sx / k;
+    const wy = sy / k + this.storage.cameraY;
 
     if (this.dragMode === 'move') {
       this.storage.selected.x = wx - this.dragOff.x;
@@ -688,21 +827,60 @@ export class ToolManager {
 
   // --- Add Image ---
 
-  addImage(src) {
+  // Перевод координат курсора (clientX/Y) в мировые координаты доски.
+  clientToWorld(clientX, clientY) {
+    const r = this.overlay.getBoundingClientRect();
+    const k = this.renderer.scale;
+    return {
+      x: (clientX - r.left) / k,
+      y: (clientY - r.top) / k + this.storage.cameraY
+    };
+  }
+
+  // Загружает список файлов-изображений (drop / paste) и добавляет их на доску.
+  // centerWorld — необязательная точка (мир), вокруг которой центрировать; при
+  // нескольких файлах они слегка смещаются, чтобы не накладываться полностью.
+  addImageFiles(files, centerWorld) {
+    files.forEach((f, i) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const place = centerWorld
+          ? { cx: centerWorld.x + i * 16, cy: centerWorld.y + i * 16 }
+          : null;
+        this.addImage(reader.result, place);
+      };
+      reader.readAsDataURL(f);
+    });
+  }
+
+  addImage(src, place) {
     const img = new Image();
     img.onload = () => {
-      const maxW = Math.min(this.renderer.W * 0.9, img.naturalWidth);
-      const sc = Math.min(maxW / img.naturalWidth, (this.renderer.H * 0.72) / img.naturalHeight, 1);
+      const viewWorldH = this.renderer.H / this.renderer.scale;   // видимая высота (мир)
+      const maxW = Math.min(BOARD_W * 0.9, img.naturalWidth);
+      const sc = Math.min(maxW / img.naturalWidth, (viewWorldH * 0.72) / img.naturalHeight, 1);
       const iw = img.naturalWidth * sc;
       const ih = img.naturalHeight * sc;
+
+      let x, y;
+      if (place) {
+        x = place.cx - iw / 2;                 // центрируем в точке вставки
+        y = place.cy - ih / 2;
+      } else {
+        x = (BOARD_W - iw) / 2;                // по центру по горизонтали
+        y = this.storage.cameraY + 24;         // у верхнего края видимой области
+      }
+      // держим картинку в пределах ширины доски и не выше видимого верха
+      x = Math.max(12, Math.min(x, BOARD_W - iw - 12));
+      y = Math.max(this.storage.cameraY + 12, y);
 
       const imageId = generateUUID();
       const im = {
         id: imageId,
         src,
         img,
-        x: Math.max(12, (this.renderer.W - iw) / 2),   // по центру по горизонтали
-        y: this.storage.cameraY + 24,                  // у верхнего края видимой области
+        x: x,
+        y: y,
         w: iw,
         h: ih
       };
@@ -771,8 +949,9 @@ export class ToolManager {
 
   exportPNG() {
     const margin = 40;
-    const fullW = this.renderer.W;
-    const fullH = Math.max(this.renderer.H, Math.ceil(this.storage.contentBottom) + margin);
+    const fullW = BOARD_W;                                    // единая ширина холста
+    const viewWorldH = this.renderer.H / this.renderer.scale; // видимая высота (мир)
+    const fullH = Math.max(Math.round(viewWorldH), Math.ceil(this.storage.contentBottom) + margin);
     const scale = Math.min(1, MAX_EXPORT_H / fullH);
     const outW = Math.round(fullW * scale), outH = Math.round(fullH * scale);
 

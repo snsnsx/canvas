@@ -19,9 +19,7 @@ os.makedirs(BOARDS, exist_ok=True)
 
 # Имя доски: латиница/цифры/подчёркивание/дефис, до 64 символов.
 SAFE_ID = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
-
-# Сообщения сигналинга WebRTC: ретранслируем как есть, состояние доски не трогаем.
-SIGNAL_TYPES = {"rtc-join", "rtc-hello", "rtc-offer", "rtc-answer", "rtc-ice", "rtc-leave"}
+EPHEMERAL_WS_TYPES = {"cursorMove", "cursorLeave"}
 
 app = FastAPI()
 
@@ -38,10 +36,10 @@ class BoardState:
     def __init__(self, board_id: str):
         self.board_id = board_id
         self.v = 1
-        self.grid = "grid"
+        self.grid = "none"
         self.contentBottom = 0.0
         self.penColors = ["#1f1f42", "#dc2626", "#14992f"]
-        self.hlColors = ["#fde047", "#86efac"]
+        self.hlColors = ["#fde047", "#7f46a4"]
         self.objects = {}  # UUID -> dict (stroke or image)
         self.version = 0
 
@@ -50,7 +48,7 @@ class BoardState:
         self.grid = data.get("grid", "grid")
         self.contentBottom = float(data.get("contentBottom", 0.0))
         self.penColors = data.get("penColors", ["#1f1f42", "#dc2626", "#14992f"])
-        self.hlColors = data.get("hlColors", ["#fde047", "#86efac"])
+        self.hlColors = data.get("hlColors", ["#fde047", "#7f46a4"])
         self.version = int(data.get("version", self.version))
 
         self.objects = {}
@@ -68,7 +66,7 @@ class BoardState:
                 "tool": s.get("tool", "pen"),
                 "color": s.get("color", "#000000"),
                 "size": float(s.get("size", 2)),
-                "points": [{"x": float(p[0]), "y": float(p[1])} if isinstance(p, list) else p for p in s.get("points", [])]
+                "points": [self._decode_point(p) for p in s.get("points", [])]
             }
 
         # Load legacy images
@@ -123,32 +121,78 @@ class BoardState:
             "version": self.version
         }
 
+    @staticmethod
+    def _point_y(p):
+        return p["y"] if isinstance(p, dict) else p[1]
+
+    @staticmethod
+    def _decode_point(p):
+        if isinstance(p, list):
+            point = {"x": float(p[0]), "y": float(p[1])}
+            if len(p) > 2:
+                try:
+                    pressure = float(p[2])
+                except (TypeError, ValueError):
+                    pressure = None
+                if pressure is not None:
+                    point["pressure"] = max(0.0, min(1.0, pressure))
+            return point
+        return p
+
+    def _bump_bottom(self, y: float):
+        if y > self.contentBottom:
+            self.contentBottom = y
+
+    def _bump_points(self, points, size: float = 0.0):
+        # Рост границы только по переданным точкам — без обхода всего штриха.
+        for p in points:
+            y = self._point_y(p)
+            if y + size > self.contentBottom:
+                self.contentBottom = y + size
+
+    def _bump_object(self, obj: dict):
+        if obj.get("type") == "stroke":
+            pts = obj.get("points", [])
+            if pts:
+                my = max(self._point_y(p) for p in pts)
+                self._bump_bottom(my + obj.get("size", 0.0))
+        elif obj.get("type") == "image":
+            self._bump_bottom(obj.get("y", 0.0) + obj.get("h", 0.0))
+
     def apply_operation(self, op_type: str, payload: dict):
+        # contentBottom обновляется по месту: операции роста только двигают границу
+        # вниз, а полный пересчёт нужен лишь там, где содержимое может уменьшиться.
         if op_type == "beginStroke":
             sid = payload["strokeId"]
-            self.objects[sid] = {
+            obj = {
                 "id": sid,
                 "type": "stroke",
                 "tool": payload["tool"],
                 "color": payload["color"],
                 "size": float(payload["size"]),
-                "points": [{"x": float(p[0]), "y": float(p[1])} for p in payload.get("points", [])]
+                "points": [self._decode_point(p) for p in payload.get("points", [])]
             }
+            self.objects[sid] = obj
+            self._bump_object(obj)
         elif op_type == "appendPoints":
             sid = payload["strokeId"]
-            if sid in self.objects:
-                pts = [{"x": float(p[0]), "y": float(p[1])} for p in payload.get("points", [])]
-                self.objects[sid]["points"].extend(pts)
+            obj = self.objects.get(sid)
+            if obj is not None and obj.get("type") == "stroke":
+                pts = [self._decode_point(p) for p in payload.get("points", [])]
+                obj["points"].extend(pts)
+                self._bump_points(pts, obj.get("size", 0.0))
         elif op_type == "endStroke":
             pass
         elif op_type == "deleteObject":
             oid = payload["objectId"]
             if oid in self.objects:
                 del self.objects[oid]
+                self.recompute_content_bottom()
         elif op_type == "restoreObject":
             oid = payload["objectId"]
             data = payload["data"]
             self.objects[oid] = data
+            self._bump_object(data)
         elif op_type == "moveObject":
             oid = payload["objectId"]
             if oid in self.objects:
@@ -158,9 +202,10 @@ class BoardState:
                     self.objects[oid]["w"] = float(payload["w"])
                 if "h" in payload:
                     self.objects[oid]["h"] = float(payload["h"])
+                self.recompute_content_bottom()
         elif op_type == "addImage":
             iid = payload["imageId"]
-            self.objects[iid] = {
+            obj = {
                 "id": iid,
                 "type": "image",
                 "src": payload["src"],
@@ -169,11 +214,13 @@ class BoardState:
                 "w": float(payload["w"]),
                 "h": float(payload["h"])
             }
+            self.objects[iid] = obj
+            self._bump_object(obj)
         elif op_type == "changeGrid":
             self.grid = payload["grid"]
         elif op_type == "clearBoard":
             self.objects.clear()
-            self.contentBottom = 0
+            self.contentBottom = 0.0
         elif op_type == "undo":
             if "inverseOp" in payload:
                 inner = payload["inverseOp"]
@@ -183,15 +230,13 @@ class BoardState:
                 inner = payload["op"]
                 self.apply_operation(inner["type"], inner["payload"])
 
-        self.recompute_content_bottom()
-
     def recompute_content_bottom(self):
         m = 0.0
         for obj in self.objects.values():
             if obj["type"] == "stroke":
                 points = obj.get("points", [])
                 if points:
-                    my = max(p["y"] if isinstance(p, dict) else p[1] for p in points)
+                    my = max(self._point_y(p) for p in points)
                     m = max(m, my + obj.get("size", 0.0))
             elif obj["type"] == "image":
                 m = max(m, obj.get("y", 0.0) + obj.get("h", 0.0))
@@ -250,6 +295,19 @@ class BoardManager:
                             dead_sockets.add(client)
                 for ws in dead_sockets:
                     self.boards[board_id]["clients"].discard(ws)
+
+    async def presence_count(self, board_id: str) -> int:
+        # Число подключённых сокетов доски (прокси числа участников онлайн).
+        async with self.lock:
+            if board_id in self.boards:
+                return len(self.boards[board_id]["clients"])
+            return 0
+
+    async def broadcast_presence(self, board_id: str):
+        # Рассылаем актуальный счётчик участников всем клиентам доски
+        # (включая отправителя — ему тоже нужно показать число).
+        count = await self.presence_count(board_id)
+        await self.broadcast(board_id, {"type": "presence", "count": count})
 
     async def schedule_save(self, board_id: str):
         async with self.lock:
@@ -311,10 +369,6 @@ async def get_network():
 async def get_tools():
     return FileResponse(os.path.join(BASE, "tools.js"), media_type="application/javascript")
 
-@app.get("/voice.js")
-async def get_voice():
-    return FileResponse(os.path.join(BASE, "voice.js"), media_type="application/javascript")
-
 # --- Иконки (favicon) ---
 # Отдаём только разрешённые файлы из корня проекта.
 ICONS = {
@@ -354,14 +408,13 @@ async def websocket_endpoint(websocket: WebSocket, board_id: str):
         return
 
     await board_manager.connect(board_id, websocket)
+    await board_manager.broadcast_presence(board_id)
     try:
         while True:
             data = await websocket.receive_json()
 
             op_type = data.get("type")
-
-            # --- Голосовой звонок (WebRTC): чистый сигналинг, без записи в состояние ---
-            if op_type in SIGNAL_TYPES:
+            if op_type in EPHEMERAL_WS_TYPES:
                 await board_manager.broadcast(board_id, data, exclude=websocket)
                 continue
 
@@ -377,9 +430,11 @@ async def websocket_endpoint(websocket: WebSocket, board_id: str):
             await board_manager.schedule_save(board_id)
     except WebSocketDisconnect:
         await board_manager.disconnect(board_id, websocket)
+        await board_manager.broadcast_presence(board_id)
     except Exception as e:
         print(f"WS Exception on {board_id}: {e}")
         await board_manager.disconnect(board_id, websocket)
+        await board_manager.broadcast_presence(board_id)
 
 if __name__ == "__main__":
     import uvicorn

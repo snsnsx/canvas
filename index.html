@@ -11,242 +11,658 @@
 <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
 <link rel="alternate icon" href="/favicon.ico">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<meta name="theme-color" content="#18181b">
+<meta name="theme-color" content="#ffffff">
 <style>
-  :root{
-    --bg:#f3f3f4;          /* поле */
-    --panel:#ffffff;        /* панель инструментов */
-    --line:#e4e4e7;         /* разделители, рамки */
-    --ui:#3f3f46;           /* иконки */
-    --ui-strong:#18181b;    /* активная иконка/текст */
-    --muted:#a1a1aa;        /* приглушённое */
-    --hover:#f0f0f2;        /* ховер кнопок */
-    --sel:#ececef;          /* фон активного инструмента */
-    --grid:#e3e3e6;         /* линии сетки */
-    --grid-strong:#d7d7db;  /* линейка */
-    --accent:#27272a;       /* кольцо выбора */
-    --radius:11px;
-    --shadow:0 1px 0 rgba(0,0,0,.04), 0 2px 8px rgba(0,0,0,.05);
-  }
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  html,body{
-    margin:0;height:100%;width:100%;overflow:hidden;background:var(--bg);
-    overscroll-behavior:none;-webkit-text-size-adjust:100%;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    color:var(--ui);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
-  }
-  #app{position:fixed;inset:0;display:flex;flex-direction:column;}
-
-  /* ---------- Панель ---------- */
-  #bar{
-    flex:0 0 auto;display:flex;align-items:center;gap:6px;
-    height:54px;padding:0 10px;background:var(--panel);
-    border-bottom:1px solid var(--line);box-shadow:var(--shadow);
-    overflow-x:auto;overflow-y:hidden;scrollbar-width:none;z-index:5;
-  }
-  #bar::-webkit-scrollbar{display:none;}
-  .group{display:flex;align-items:center;gap:4px;flex:0 0 auto;}
-  .sep{flex:0 0 auto;width:1px;height:26px;background:var(--line);margin:0 4px;}
-  .spacer{flex:1 1 auto;min-width:6px;}
-
-  .btn{
-    flex:0 0 auto;width:40px;height:40px;border:none;background:transparent;border-radius:var(--radius);
-    display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ui);
-    transition:background .12s ease;padding:0;position:relative;
-  }
-  .btn:hover{background:var(--hover);}
-  .btn:active{background:var(--sel);}
-  .btn:focus-visible{outline:2px solid var(--ui-strong);outline-offset:-2px;}
-  .btn.on{background:var(--sel);color:var(--ui-strong);}
-  .btn svg{width:22px;height:22px;display:block;pointer-events:none;}
-  .vol{fill-opacity:.24;}  /* мягкое «тело» двухтоновой иконки — объём/глубина */
-  .btn[disabled]{opacity:.35;cursor:default;}
-  .btn[disabled]:hover{background:transparent;}
-  /* иконки едины по стилю (Material Symbols), различаются лишь смысловым цветом */
-  .callbtn{color:#10b981;}      /* телефон — «позвонить» */
-  #clearBtn{color:#dc2626;}     /* корзина — деструктивное действие */
-
-  /* свотчи цветов */
-  .swatch{
-    flex:0 0 auto;width:40px;height:40px;border:none;background:transparent;border-radius:var(--radius);
-    display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;position:relative;
-  }
-  .swatch:hover{background:var(--hover);}
-  .swatch .dot{
-    width:24px;height:24px;border-radius:20%;
-    box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);
-  }
-  .swatch.hl .dot{width:20px;height:26px;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);}
-  .swatch.sel::after{
-    content:"";position:absolute;inset:4px;border-radius:9px;
-    box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent);
+  :root {
+    color-scheme: light;
+    --app-bg: #f7f8f7;
+    --paper: #ffffff;
+    --text: #151515;
+    --muted: #6b6f6d;
+    --line: rgba(21, 21, 21, 0.11);
+    --line-strong: rgba(21, 21, 21, 0.18);
+    --panel: rgba(255, 255, 255, 0.86);
+    --panel-solid: #ffffff;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.10), 0 2px 10px rgba(0, 0, 0, 0.05);
+    --accent: #10a37f;
+    --accent-soft: rgba(57, 77, 254, 0.13);
+    --accent-line: rgba(57, 77, 254, 0.25);
+    --danger: #cf2e2e;
+    --ui-strong: #151515;
+    --grid: rgba(21, 21, 21, 0.065);
+    --grid-strong: rgba(21, 21, 21, 0.15);
+    --radius: 8px;
+    --control: 32px;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
-  /* размер кисти: три точки */
-  .sizes{display:flex;align-items:center;gap:2px;}
-  .size{
-    flex:0 0 auto;width:32px;height:40px;border:none;background:transparent;border-radius:9px;
-    display:flex;align-items:center;justify-content:center;cursor:pointer;
+  * {
+    box-sizing: border-box;
   }
-  .size:hover{background:var(--hover);}
-  .size .pip{border-radius:50%;background:var(--ui);}
-  .size.sel{background:var(--sel);}
-  .size.sel .pip{background:var(--ui-strong);}
 
-  /* сегмент сетки */
-  .seg{display:flex;align-items:center;background:var(--bg);border-radius:10px;padding:3px;gap:2px;}
-  .seg .btn{width:34px;height:32px;border-radius:7px;}
-  .seg .btn svg{width:18px;height:18px;}
-  .seg .btn.on{background:var(--panel);color:var(--ui-strong);box-shadow:0 1px 2px rgba(0,0,0,.08);}
-
-  /* ---------- Холст ---------- */
-  #stage{position:relative;flex:1 1 auto;min-height:0;background:var(--bg);overflow:hidden;touch-action:none;}
-  #stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
-  #back{z-index:1;}
-  #ink{z-index:2;}
-  #overlay{z-index:3;touch-action:none;}
-
-  /* боковой скроллбар (вертикальный) */
-  #vbar{
-    position:absolute;top:8px;bottom:8px;right:7px;width:9px;z-index:4;pointer-events:none;
-    border-radius:9px;background:rgba(0,0,0,.05);opacity:0;transition:opacity .25s ease;
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--app-bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  #vbar.show{opacity:1;}
-  #thumb{position:absolute;left:0;width:100%;border-radius:9px;background:rgba(0,0,0,.22);cursor:grab;min-height:28px;pointer-events:auto;}
-  #thumb:active{cursor:grabbing;background:rgba(0,0,0,.32);}
 
-  /* тост */
-  #toast{
-    position:absolute;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);
-    background:var(--ui-strong);color:#fff;font-size:13px;padding:9px 14px;border-radius:10px;
-    opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;z-index:20;white-space:nowrap;
+  body {
+    overscroll-behavior: none;
+    touch-action: none;
+    user-select: none;
   }
-  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
-  /* ---------- Голосовой звонок ---------- */
-  .callbtn.active{background:#10b981;color:#fff;}
-  .callbtn.active:hover{background:#0ea674;}
-  .callbtn.active::after{
-    content:attr(data-count);position:absolute;top:2px;right:2px;min-width:15px;height:15px;
-    padding:0 3px;border-radius:8px;background:var(--ui-strong);color:#fff;font-size:10px;
-    line-height:15px;text-align:center;box-shadow:0 0 0 2px var(--panel);
+  button,
+  input {
+    font: inherit;
   }
-  .micbtn.muted{color:#dc2626;}
-  .micbtn .mic-off{display:none;}
-  .micbtn.muted .mic-on{display:none;}
-  .micbtn.muted .mic-off{display:block;}
 
-  #audioSink{position:absolute;width:0;height:0;overflow:hidden;}
-
-  #voicePanel{
-    position:absolute;left:10px;bottom:14px;z-index:18;min-width:150px;max-width:230px;
-    background:var(--panel);border:1px solid var(--line);border-radius:12px;
-    box-shadow:var(--shadow);padding:8px;font-size:13px;color:var(--ui-strong);
+  button {
+    -webkit-tap-highlight-color: transparent;
   }
-  .vp-head{display:flex;align-items:center;gap:6px;font-weight:600;margin:2px 4px 6px;
-    font-size:12px;color:var(--ui);}
-  .vp-live{width:8px;height:8px;border-radius:50%;background:#10b981;animation:vp-pulse 1.6s infinite;}
-  @keyframes vp-pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.5);}70%{box-shadow:0 0 0 6px rgba(16,185,129,0);}100%{box-shadow:0 0 0 0 rgba(16,185,129,0);}}
-  .vp-item{display:flex;align-items:center;gap:8px;padding:4px;border-radius:8px;}
-  .vp-item.pending{opacity:.55;}
-  .vp-dot{width:9px;height:9px;border-radius:50%;background:var(--c,#888);flex:0 0 auto;
-    transition:box-shadow .1s ease,transform .1s ease;}
-  .vp-dot.speaking{box-shadow:0 0 0 3px color-mix(in srgb, var(--c) 35%, transparent);transform:scale(1.18);}
-  .vp-name{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .vp-name em{color:var(--muted);font-style:normal;font-size:11px;}
-  .vp-mute{flex:0 0 auto;font-size:12px;}
 
-  .hidden{display:none !important;}
-
-  @media (max-width:560px){
-    .btn,.swatch{width:36px;height:36px;}
-    #bar{height:50px;gap:4px;}
+  .app {
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(circle at 50% -20%, rgba(16, 163, 127, 0.06), transparent 34%),
+      var(--app-bg);
   }
-  @media (prefers-reduced-motion:reduce){*{transition:none !important;}}
+
+  .stage {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background: var(--paper);
+    cursor: crosshair;
+  }
+
+  .stage.erase {
+    cursor: none;
+  }
+
+  .stage canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  #back {
+    z-index: 1;
+    background: var(--paper);
+  }
+
+  #ink {
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  #overlay {
+    z-index: 3;
+    touch-action: none;
+  }
+
+  .toolbar {
+    position: fixed;
+    z-index: 20;
+    top: max(18px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: max-content;
+    padding: 0 5px;
+    border-right: 1px solid var(--line);
+  }
+
+  .group:last-child {
+    border-right: 0;
+    padding-right: 2px;
+  }
+
+  .group-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .swatches,
+  .sizes,
+  .segmented {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .btn,
+  .swatch,
+  .size {
+    width: var(--control);
+    height: var(--control);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    display: inline-grid;
+    place-items: center;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .btn {
+    padding: 0 10px;
+    width: auto;
+    min-width: var(--control);
+    font-size: 13px;
+    font-weight: 570;
+    white-space: nowrap;
+  }
+
+  .btn.icon {
+    width: var(--control);
+    padding: 0;
+    font-size: 16px;
+  }
+
+  .btn.icon .m-icon {
+    width: 21px;
+    height: 21px;
+    display: block;
+    overflow: visible;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
+    transition: transform 140ms ease, filter 140ms ease;
+  }
+
+  .btn.icon:hover .m-icon,
+  .btn.icon.on .m-icon {
+    transform: translateY(-1px);
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.18));
+  }
+
+  .btn.icon:disabled .m-icon {
+    filter: grayscale(0.75) opacity(0.55);
+  }
+
+  .m-edge {
+    stroke: rgba(29, 34, 32, 0.22);
+    stroke-width: 1;
+  }
+
+  .m-highlight {
+    fill: rgba(255, 255, 255, 0.62);
+  }
+
+  .btn:hover {
+    background: rgba(21, 21, 21, 0.055);
+  }
+
+  .btn:focus-visible,
+  .swatch:focus-visible,
+  .size:focus-visible {
+    outline: 2px solid var(--accent-line);
+    outline-offset: 2px;
+  }
+
+  .btn.on {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px rgba(16, 163, 127, 0.08);
+  }
+
+  .btn:active,
+  .swatch:active,
+  .size:active {
+    transform: translateY(1px);
+  }
+
+  .btn:disabled {
+    opacity: 0.34;
+    cursor: default;
+    transform: none;
+  }
+
+  .btn.danger {
+    color: var(--danger);
+  }
+
+  .swatch {
+    padding: 0;
+  }
+
+  .swatch .dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+    transition: box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .swatch.hl .dot {
+    width: 20px;
+    height: 12px;
+    border-radius: 999px;
+  }
+
+  .swatch:hover .dot {
+    box-shadow:
+      0 0 0 5px rgba(21, 21, 21, 0.055),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  }
+
+  .swatch.sel .dot {
+    box-shadow:
+      0 0 0 5px var(--accent-line),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  }
+
+  .size .pip {
+    display: block;
+    border-radius: 50%;
+    background: var(--text);
+    transition: box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .size:hover .pip {
+    box-shadow: 0 0 0 7px rgba(21, 21, 21, 0.055);
+  }
+
+  .size.sel .pip {
+    box-shadow:
+      0 0 0 4px var(--accent-line);
+  }
+
+  .status {
+    gap: 8px;
+  }
+
+  .presence {
+    min-height: var(--control);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(21, 21, 21, 0.045);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 560;
+    white-space: nowrap;
+  }
+
+  .presence-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(16, 163, 127, 0.12);
+  }
+
+  .vbar {
+    position: fixed;
+    z-index: 12;
+    top: calc(max(12px, env(safe-area-inset-top)) + 74px);
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: 10px;
+    border-radius: 999px;
+    background: rgba(21, 21, 21, 0.045);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+  }
+
+  .vbar.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .thumb {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    min-height: 28px;
+    border-radius: 999px;
+    background: rgba(21, 21, 21, 0.34);
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .thumb:active {
+    cursor: grabbing;
+  }
+
+  .eraser-cursor {
+    position: absolute;
+    z-index: 11;
+    width: 28px;
+    height: 28px;
+    border: 1.5px solid rgba(21, 21, 21, 0.72);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.32);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.72);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: opacity 80ms ease;
+  }
+
+  .eraser-cursor.show {
+    opacity: 1;
+  }
+
+  .toast {
+    position: fixed;
+    z-index: 30;
+    left: 50%;
+    bottom: max(18px, env(safe-area-inset-bottom));
+    max-width: min(420px, calc(100vw - 32px));
+    transform: translate(-50%, 12px);
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-solid);
+    box-shadow: var(--shadow);
+    color: var(--text);
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (max-width: 760px) {
+    :root {
+      --control: 31px;
+    }
+
+    .toolbar {
+      top: max(8px, env(safe-area-inset-top));
+      right: max(8px, env(safe-area-inset-right));
+      width: max-content;
+      max-width: calc(100vw - 16px);
+      padding: 5px;
+      gap: 3px;
+    }
+
+    .group {
+      padding: 0 4px;
+    }
+
+    .btn {
+      padding: 0 8px;
+      font-size: 12px;
+    }
+
+    .vbar {
+      top: calc(max(8px, env(safe-area-inset-top)) + 62px);
+      right: max(8px, env(safe-area-inset-right));
+    }
+  }
 </style>
 </head>
 <body>
-<div id="app">
-  <div id="bar">
-    <!-- ───── Слева: аудиозвонки ───── -->
-    <div class="group" id="voiceGroup">
-      <button class="btn callbtn" id="callBtn" title="Голосовой звонок" data-count="0">
-        <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M795-120q-116 0-236.5-56T335-335Q232-438 176-558.5T120-795q0-19 13-32t32-13h140q14 0 24 10t14 25l27 126q2 14-.5 25.5T359-634L259-533q26 44 55 82t64 72q37 38 78 69.5t86 55.5l95-98q10-11 23-15t26-2l119 26q15 4 25 16t10 27v135q0 19-13 32t-32 13Z"/><path d="M795-120q-116 0-236.5-56T335-335Q232-438 176-558.5T120-795q0-19.29 12.86-32.14Q145.71-840 165-840h140q14 0 24 10t14 25l26.93 125.64Q372-665 369.5-653.5t-10.73 19.73L259-533q26 44 55 82t64 72q37 38 78 69.5t86 55.5l95-98q10-11 23.15-15 13.15-4 25.85-2l119 26q15 4 25 16.04 10 12.05 10 26.96v135q0 19.29-12.86 32.14Q814.29-120 795-120ZM229-588l81-82-23-110H180q2 42 13.5 88.5T229-588Zm369 363q41 19 89 31t93 14v-107l-103-21-79 83ZM229-588Zm369 363Z"/></svg>
-      </button>
-      <button class="btn micbtn hidden" id="muteBtn" title="Выключить микрофон">
-        <svg class="mic-on" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M408-453.92q-29-30.91-29-75.08v-251q0-41.67 29.44-70.83Q437.88-880 479.94-880t71.56 29.17Q581-821.67 581-780v251q0 44.17-29 75.08Q523-423 480-423t-72-30.92ZM450-150v-106q-96-11-166.5-77.5T202-498q-2-12.85 6.59-21.93 8.6-9.07 21.5-9.07 12.91 0 21.41 9t10.5 22q12 81 74.71 132.5Q399.42-314 479.65-314q81.35 0 143.85-51.5T698-498q2-13 10.68-22 8.67-9 21.5-9 12.82 0 21.32 9.07 8.5 9.08 6.5 21.93-11 97-81 164t-167 78v106q0 12.75-8.68 21.37-8.67 8.63-21.5 8.63-12.82 0-21.32-8.63-8.5-8.62-8.5-21.37Z"/><path d="M408-453.92q-29-30.91-29-75.08v-251q0-41.67 29.44-70.83Q437.88-880 479.94-880t71.56 29.17Q581-821.67 581-780v251q0 44.17-29 75.08Q523-423 480-423t-72-30.92ZM480-651Zm-30 501v-106q-96-11-166.5-77.5T202-498q-2-12.85 6.59-21.93 8.6-9.07 21.5-9.07 12.91 0 21.41 9t10.5 22q12 81 74.71 132.5Q399.42-314 479.65-314q81.35 0 143.85-51.5T698-498q2-13 10.68-22 8.67-9 21.5-9 12.82 0 21.32 9.07 8.5 9.08 6.5 21.93-11 97-81 164t-167 78v106q0 12.75-8.68 21.37-8.67 8.63-21.5 8.63-12.82 0-21.32-8.63-8.5-8.62-8.5-21.37Zm59.5-346.5Q521-510 521-529v-251q0-17-11.79-28.5T480-820q-17.42 0-29.21 11.5T439-780v251q0 19 11.5 32.5T480-483q18 0 29.5-13.5Z"/></svg>
-        <svg class="mic-off" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M658-381q-10-8-11-20t7-22q11-17 18-36t10-39q2-13 10.5-22t21.5-9q13 0 21.5 9t6.5 22q-4 30-14 59t-28 54q-8 10-20 11t-22-7ZM514-532 381-666q-8-8-13-19.5t-5-23.5v-70q0-42 29.5-71.5T464-880q42 0 71.5 29.5T565-779v225q0 20-18.5 28t-32.5-6Zm-80 382v-106q-96-11-166.5-77.5T186-498q-2-13 6.5-22t21.5-9q13 0 21.5 9t10.5 22q12 81 74.5 132.5T464-314q39 0 73.5-12.5T601-361l43 43q-31 26-69 41.5T494-256v106q0 13-8.5 21.5T464-120q-13 0-21.5-8.5T434-150Zm378 76L55-831q-8-8-8-19t8-19q8-8 19-8t19 8l757 757q8 8 8 19t-8 19q-8 8-19 8t-19-8Z"/><path d="M658-381q-10-8-11-20t7-22q10.89-16.84 17.89-35.97T682-498q2-13 10.68-22 8.67-9 21.5-9 12.82 0 21.32 9.07 8.5 9.08 6.5 21.93-4 30.21-14 59.1-10 28.9-28 53.9-8 10-19.94 11-11.93 1-22.06-7ZM461-586Zm2.94-294q42.06 0 71.56 29.46T565-779v226q0 15-9.32 22.5t-20.5 7.5q-11.18 0-20.68-7.94T505-554v-225q0-17.42-12-29.21T464-820q-17 0-29 11.79T423-779v83q0 15-9.32 22.5t-20.5 7.5q-11.18 0-20.68-7.68-9.5-7.69-9.5-22.32v-83q0-42.08 29.44-71.54Q421.88-880 463.94-880ZM434-150v-106q-96-11-166.5-77.5T186-498q-2-12.85 6.59-21.93 8.6-9.07 21.5-9.07 12.91 0 21.35 8.91 8.45 8.92 10.56 22.09 12 81 75 132.5T464.15-314q37.85 0 72.96-12.34Q572.22-338.67 601-361l43 43q-31 26-69.01 41.57Q536.97-260.86 494-256v106q0 12.75-8.68 21.37-8.67 8.63-21.5 8.63-12.82 0-21.32-8.63-8.5-8.62-8.5-21.37Zm378 76L55-831q-8-8-8-19t8-19q8-8 19-8t19 8l757 757q8 8 8 19t-8 19q-8 8-19 8t-19-8Z"/></svg>
-      </button>
-    </div>
-
-    <div class="spacer"></div>
-
-    <!-- ───── По центру: панель разметки ───── -->
-    <div class="group" id="penColors"></div>
-    <div class="sep"></div>
-    <div class="group" id="hlColors"></div>
-    <button class="btn" id="eraserBtn" title="Ластик (E)">
-      <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M678-220h173q13 0 21.5 8.5T881-190q0 13-8.5 21.5T851-160H618l60-60Zm-486 60q-6 0-11.5-2t-10.5-7l-72-75q-18-17-17.5-41.5T97-327l458-498q16-17 40.5-17t41.5 17l205 215q17 17 18 42t-16 42L512-170q-5 5-10.5 7.5T490-160H192Z"/><path d="M678-220h173q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H618l60-60Zm-486 60q-5.91 0-11.46-2-5.54-2-10.54-7l-72-75q-18-17-17.5-41.5T97-327l458-498q16-17 40.57-17 24.56 0 41.43 17l205 215q17 17 18 42t-16 42L512-170q-4.55 5-10.24 7.5T490-160H192Zm288-60 324-352-207-217-455 503 64 66h274Zm0-260Z"/></svg>
-    </button>
-    <button class="btn" id="selectBtn" title="Переместить изображение (V)">
-      <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M450-198v-159q0-13 8.5-21.5T480-387q13 0 21.5 8.5T510-357v159l67-67q9-9 22-9t22 9q9 9 9 22t-9 22L501-101q-5 5-10 7t-11 2q-6 0-11-2t-10-7L339-221q-9-9-9-22t9-22q9-9 22-9t22 9l67 67ZM198-450l62 62q9 9 9 22t-9 22q-9 9-22 9t-22-9L101-459q-5-5-7-10t-2-11q0-6 2-11t7-10l116-116q9-9 22-9t22 9q9 9 9 22t-9 22l-63 63h159q13 0 21.5 8.5T387-480q0 13-8.5 21.5T357-450H198Zm564 0H604q-13 0-21.5-8.5T574-480q0-13 8.5-21.5T604-510h158l-62-62q-9-9-9-22t9-22q9-9 22-9t22 9l115 115q5 5 7 10t2 11q0 6-2 11t-7 10L744-344q-9 9-22 9t-22-9q-9-9-9-22t9-22l62-62ZM450-762l-62 62q-9 9-22 9t-22-9q-9-9-9-22t9-22l115-115q5-5 10-7t11-2q6 0 11 2t10 7l115 115q9 9 9 22t-9 22q-9 9-22 9t-22-9l-62-62v158q0 13-8.5 21.5T480-574q-13 0-21.5-8.5T450-604v-158Z"/><path d="M450-198v-159q0-13 8.5-21.5T480-387q13 0 21.5 8.5T510-357v159l67-67q9-9 22-9t22 9q9 9 9 22t-9 22L501-101q-5 5-10 7t-11 2q-6 0-11-2t-10-7L339-221q-9-9-9-22t9-22q9-9 22-9t22 9l67 67ZM198-450l62 62q9 9 9 22t-9 22q-9 9-22 9t-22-9L101-459q-5-5-7-10t-2-11q0-6 2-11t7-10l116-116q9-9 22-9t22 9q9 9 9 22t-9 22l-63 63h159q13 0 21.5 8.5T387-480q0 13-8.5 21.5T357-450H198Zm564 0H604q-13 0-21.5-8.5T574-480q0-13 8.5-21.5T604-510h158l-62-62q-9-9-9-22t9-22q9-9 22-9t22 9l115 115q5 5 7 10t2 11q0 6-2 11t-7 10L744-344q-9 9-22 9t-22-9q-9-9-9-22t9-22l62-62ZM450-762l-62 62q-9 9-22 9t-22-9q-9-9-9-22t9-22l115-115q5-5 10-7t11-2q6 0 11 2t10 7l115 115q9 9 9 22t-9 22q-9 9-22 9t-22-9l-62-62v158q0 13-8.5 21.5T480-574q-13 0-21.5-8.5T450-604v-158Z"/></svg>
-    </button>
-    <div class="sep"></div>
-    <div class="sizes" id="sizes" title="Толщина"></div>
-
-    <div class="spacer"></div>
-
-    <!-- ───── Справа: всё остальное ───── -->
-    <div class="seg" id="gridSeg" title="Фон / сетка">
-      <button class="btn" data-grid="none" title="Без сетки">
-        <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Z"/><path d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Zm0-60h600v-600H180v600Zm0 0v-600 600Z"/></svg>
-      </button>
-      <button class="btn" data-grid="grid" title="Клетка">
-        <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M180-120h140v-200H120v140q0 24.75 17.63 42.37Q155.25-120 180-120Zm200 0h200v-200H380v200Zm260 0h140q24.75 0 42.38-17.63Q840-155.25 840-180v-140H640v200ZM120-380h200v-200H120v200Zm260 0h200v-200H380v200Zm260 0h200v-200H640v200ZM120-640h200v-200H180q-24.75 0-42.37 17.62Q120-804.75 120-780v140Zm260 0h200v-200H380v200Zm260 0h200v-140q0-24.75-17.62-42.38Q804.75-840 780-840H640v200Z"/><path d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Zm0-60h160v-160H180v160Zm220 0h160v-160H400v160Zm220 0h160v-160H620v160ZM180-400h160v-160H180v160Zm220 0h160v-160H400v160Zm220 0h160v-160H620v160ZM180-620h160v-160H180v160Zm220 0h160v-160H400v160Zm220 0h160v-160H620v160Z"/></svg>
-      </button>
-      <button class="btn" data-grid="dots" title="Точки">
-        <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M106-387q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm0-156q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm107 330q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-156q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm150.5 329.5Q348-379 348-402t15.5-38.5Q379-456 402-456t38.5 15.5Q456-425 456-402t-15.5 38.5Q425-348 402-348t-38.5-15.5Zm0-156Q348-535 348-558t15.5-38.5Q379-612 402-612t38.5 15.5Q456-581 456-558t-15.5 38.5Q425-504 402-504t-38.5-15.5ZM375-213q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-480q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm12 587q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm0-718q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm132.5 460.5Q504-379 504-402t15.5-38.5Q535-456 558-456t38.5 15.5Q612-425 612-402t-15.5 38.5Q581-348 558-348t-38.5-15.5Zm0-156Q504-535 504-558t15.5-38.5Q535-612 558-612t38.5 15.5Q612-581 612-558t-15.5 38.5Q581-504 558-504t-38.5-15.5ZM531-213q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-480q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm18 587q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm-6-718q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm150 611q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-156q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm131 306q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm0-156q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Z"/><path d="M106-387q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm0-156q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm107 330q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-156q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm150.5 329.5Q348-379 348-402t15.5-38.5Q379-456 402-456t38.5 15.5Q456-425 456-402t-15.5 38.5Q425-348 402-348t-38.5-15.5Zm0-156Q348-535 348-558t15.5-38.5Q379-612 402-612t38.5 15.5Q456-581 456-558t-15.5 38.5Q425-504 402-504t-38.5-15.5ZM375-213q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-480q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm12 587q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm0-718q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm132.5 460.5Q504-379 504-402t15.5-38.5Q535-456 558-456t38.5 15.5Q612-425 612-402t-15.5 38.5Q581-348 558-348t-38.5-15.5Zm0-156Q504-535 504-558t15.5-38.5Q535-612 558-612t38.5 15.5Q612-581 612-558t-15.5 38.5Q581-504 558-504t-38.5-15.5ZM531-213q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-480q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm18 587q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm-6-718q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm150 611q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-156q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm0-162q-11-11-11-27t11-27q11-11 27-11t27 11q11 11 11 27t-11 27q-11 11-27 11t-27-11Zm131 306q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Zm0-156q-6-6-6-15t6-15q6-6 15-6t15 6q6 6 6 15t-6 15q-6 6-15 6t-15-6Z"/></svg>
-      </button>
-      <button class="btn" data-grid="lines" title="Линейка">
-        <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M150-200q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Zm0-167q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Zm0-166q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Zm0-167q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Z"/><path d="M150-200q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Zm0-167q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Zm0-166q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Zm0-167q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h660q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H150Z"/></svg>
-      </button>
-    </div>
-
-    <div class="sep"></div>
-    <button class="btn" id="imgBtn" title="Прикрепить изображение">
-      <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Zm86-157h429q9 0 13-8t-1-16L590-457q-5-6-12-6t-12 6L446-302l-81-111q-5-6-12-6t-12 6l-86 112q-6 8-2 16t13 8Z"/><path d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Zm0-60h600v-600H180v600Zm0 0v-600 600Zm86-97h429q8.5 0 12.75-8t-.75-16L590-457q-5-6-12-6t-12 6L446-302l-81-111q-5-6-12-6t-12 6l-86 112q-6 8-1.75 16t12.75 8Z"/></svg>
-    </button>
-    <button class="btn" id="exportBtn" title="Экспорт PNG">
-      <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M469-327q-5-2-10-7L308-485q-9-9.27-8.5-21.64.5-12.36 9.11-21.36 9.39-9 21.89-9t21.5 9l98 99v-341q0-12.75 8.68-21.38 8.67-8.62 21.5-8.62 12.82 0 21.32 8.62 8.5 8.63 8.5 21.38v341l99-99q8.8-9 20.9-8.5 12.1.5 21.49 9.5 8.61 9 8.61 21.5t-9 21.5L501-334q-5 5-10.13 7-5.14 2-11 2-5.87 0-10.87-2ZM220-160q-24 0-42-18t-18-42v-113q0-12.75 8.68-21.38 8.67-8.62 21.5-8.62 12.82 0 21.32 8.62 8.5 8.63 8.5 21.38v113h520v-113q0-12.75 8.68-21.38 8.67-8.62 21.5-8.62 12.82 0 21.32 8.62 8.5 8.63 8.5 21.38v113q0 24-18 42t-42 18H220Z"/><path d="M469-327q-5-2-10-7L308-485q-9-9.27-8.5-21.64.5-12.36 9.11-21.36 9.39-9 21.89-9t21.5 9l98 99v-341q0-12.75 8.68-21.38 8.67-8.62 21.5-8.62 12.82 0 21.32 8.62 8.5 8.63 8.5 21.38v341l99-99q8.8-9 20.9-8.5 12.1.5 21.49 9.5 8.61 9 8.61 21.5t-9 21.5L501-334q-5 5-10.13 7-5.14 2-11 2-5.87 0-10.87-2ZM220-160q-24 0-42-18t-18-42v-113q0-12.75 8.68-21.38 8.67-8.62 21.5-8.62 12.82 0 21.32 8.62 8.5 8.63 8.5 21.38v113h520v-113q0-12.75 8.68-21.38 8.67-8.62 21.5-8.62 12.82 0 21.32 8.62 8.5 8.63 8.5 21.38v113q0 24-18 42t-42 18H220Z"/></svg>
-    </button>
-
-    <div class="sep"></div>
-    <button class="btn" id="undoBtn" title="Отменить (Ctrl/⌘+Z)" disabled>
-      <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M289-200q-13 0-21.5-8.5T259-230q0-13 8.5-21.5T289-260h280q70 0 120.5-46.5T740-422q0-69-50.5-115.5T569-584H274l93 93q9 9 9 21t-9 21q-9 9-21 9t-21-9L181-593q-5-5-7-10t-2-11q0-6 2-11t7-10l144-144q9-9 21-9t21 9q9 9 9 21t-9 21l-93 93h294q95 0 163.5 64T800-422q0 94-68.5 158T568-200H289Z"/><path d="M289-200q-13 0-21.5-8.5T259-230q0-13 8.5-21.5T289-260h280q70 0 120.5-46.5T740-422q0-69-50.5-115.5T569-584H274l93 93q9 9 9 21t-9 21q-9 9-21 9t-21-9L181-593q-5-5-7-10t-2-11q0-6 2-11t7-10l144-144q9-9 21-9t21 9q9 9 9 21t-9 21l-93 93h294q95 0 163.5 64T800-422q0 94-68.5 158T568-200H289Z"/></svg>
-    </button>
-    <button class="btn" id="redoBtn" title="Повторить (Ctrl/⌘+⇧+Z)" disabled>
-      <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M686-584H391q-70 0-120.5 46.5T220-422q0 69 50.5 115.5T391-260h280q13 0 21.5 8.5T701-230q0 13-8.5 21.5T671-200H392q-95 0-163.5-64T160-422q0-94 68.5-158T392-644h294l-93-93q-9-9-9-21t9-21q9-9 21-9t21 9l144 144q5 5 7 10t2 11q0 6-2 11t-7 10L635-449q-9 9-21 9t-21-9q-9-9-9-21t9-21l93-93Z"/><path d="M686-584H391q-70 0-120.5 46.5T220-422q0 69 50.5 115.5T391-260h280q13 0 21.5 8.5T701-230q0 13-8.5 21.5T671-200H392q-95 0-163.5-64T160-422q0-94 68.5-158T392-644h294l-93-93q-9-9-9-21t9-21q9-9 21-9t21 9l144 144q5 5 7 10t2 11q0 6-2 11t-7 10L635-449q-9 9-21 9t-21-9q-9-9-9-21t9-21l93-93Z"/></svg>
-    </button>
-    <button class="btn" id="clearBtn" title="Очистить доску">
-      <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path class="vol" d="M261-120q-24.75 0-42.37-17.63Q201-155.25 201-180v-570h-11q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h158q0-13 8.63-21.5 8.62-8.5 21.37-8.5h204q12.75 0 21.38 8.62Q612-822.75 612-810h158q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5h-11v570q0 24.75-17.62 42.37Q723.75-120 699-120H261Zm157.5-154.63q8.5-8.62 8.5-21.37v-339q0-12.75-8.68-21.38-8.67-8.62-21.5-8.62-12.82 0-21.32 8.62-8.5 8.63-8.5 21.38v339q0 12.75 8.68 21.37 8.67 8.63 21.5 8.63 12.82 0 21.32-8.63Zm166 0q8.5-8.62 8.5-21.37v-339q0-12.75-8.68-21.38-8.67-8.62-21.5-8.62-12.82 0-21.32 8.62-8.5 8.63-8.5 21.38v339q0 12.75 8.68 21.37 8.67 8.63 21.5 8.63 12.82 0 21.32-8.63Z"/><path d="M261-120q-24.75 0-42.37-17.63Q201-155.25 201-180v-570h-11q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h158q0-13 8.63-21.5 8.62-8.5 21.37-8.5h204q12.75 0 21.38 8.62Q612-822.75 612-810h158q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5h-11v570q0 24.75-17.62 42.37Q723.75-120 699-120H261Zm438-630H261v570h438v-570ZM418.5-274.63q8.5-8.62 8.5-21.37v-339q0-12.75-8.68-21.38-8.67-8.62-21.5-8.62-12.82 0-21.32 8.62-8.5 8.63-8.5 21.38v339q0 12.75 8.68 21.37 8.67 8.63 21.5 8.63 12.82 0 21.32-8.63Zm166 0q8.5-8.62 8.5-21.37v-339q0-12.75-8.68-21.38-8.67-8.62-21.5-8.62-12.82 0-21.32 8.62-8.5 8.63-8.5 21.38v339q0 12.75 8.68 21.37 8.67 8.63 21.5 8.63 12.82 0 21.32-8.63ZM261-750v570-570Z"/></svg>
-    </button>
-  </div>
-
-  <div id="stage">
+<main class="app" aria-label="onCanvas">
+  <section id="stage" class="stage" aria-label="Рабочая область доски">
     <canvas id="back"></canvas>
     <canvas id="ink"></canvas>
     <canvas id="overlay"></canvas>
-    <div id="vbar"><div id="thumb"></div></div>
-    <div id="audioSink" aria-hidden="true"></div>
-    <div id="voicePanel" class="hidden">
-      <div class="vp-head"><span class="vp-live"></span>В звонке</div>
-      <div id="voiceRoster"></div>
+    <div id="eraserCursor" class="eraser-cursor" aria-hidden="true"></div>
+    <div id="vbar" class="vbar" aria-hidden="true">
+      <div id="thumb" class="thumb"></div>
     </div>
-    <div id="toast"></div>
-  </div>
-</div>
+  </section>
 
-<input id="fileInput" type="file" accept="image/*" class="hidden">
+  <header class="toolbar" aria-label="Инструменты доски">
+    <div class="group" aria-label="Цвета ручки">
+      <span class="group-label">Перо</span>
+      <div id="penColors" class="swatches"></div>
+    </div>
+
+    <div class="group" aria-label="Цвета маркера">
+      <span class="group-label">Маркер</span>
+      <div id="hlColors" class="swatches"></div>
+    </div>
+
+    <div class="group" aria-label="Инструменты">
+      <button id="eraserBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Ластик" title="Ластик (E)">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="i-eraser-body" x1="5" y1="4" x2="19" y2="20" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#FFD6E7"/>
+              <stop offset="0.52" stop-color="#FF8AB8"/>
+              <stop offset="1" stop-color="#D0BCFF"/>
+            </linearGradient>
+            <linearGradient id="i-eraser-cap" x1="9" y1="14" x2="18" y2="21" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#E6FFFA"/>
+              <stop offset="1" stop-color="#80CBC4"/>
+            </linearGradient>
+          </defs>
+          <path d="M6.3 12.5 12.5 6.3c.7-.7 1.9-.7 2.6 0l3.1 3.1c.7.7.7 1.9 0 2.6l-6.2 6.2c-.7.7-1.9.7-2.6 0l-3.1-3.1c-.7-.7-.7-1.9 0-2.6Z" fill="url(#i-eraser-body)" class="m-edge"/>
+          <path d="m11.4 17 4.8-4.8 2 2c.7.7.7 1.8 0 2.5L16 18.9H9.4l2-1.9Z" fill="url(#i-eraser-cap)" class="m-edge"/>
+          <path d="M8.2 12.5 13 7.7c.4-.4 1-.4 1.4 0" fill="none" stroke="rgba(255,255,255,.72)" stroke-width="1.35" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div id="sizes" class="sizes" aria-label="Толщина линии"></div>
+    </div>
+
+    <div class="group" aria-label="Фон доски">
+      <span class="group-label">Фон</span>
+      <div id="gridSeg" class="segmented">
+        <button class="btn icon" type="button" data-grid="none" aria-pressed="false" aria-label="Без сетки" title="Без сетки">
+          <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="i-none-paper" x1="5" y1="4" x2="19" y2="20" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#FFFFFF"/>
+                <stop offset="1" stop-color="#DFF7EE"/>
+              </linearGradient>
+            </defs>
+            <rect x="5" y="4.5" width="14" height="15" rx="4" fill="url(#i-none-paper)" class="m-edge"/>
+            <path d="M8.7 7.7h4.8" stroke="rgba(255,255,255,.85)" stroke-width="1.3" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="2.2" fill="#10A37F"/>
+            <circle cx="11.3" cy="11.2" r=".75" class="m-highlight"/>
+          </svg>
+        </button>
+        <button class="btn icon" type="button" data-grid="grid" aria-pressed="false" aria-label="Клетка" title="Клетка">
+          <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="i-grid-tile" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#D7FCE8"/>
+                <stop offset=".55" stop-color="#8EE8C8"/>
+                <stop offset="1" stop-color="#B8C7FF"/>
+              </linearGradient>
+            </defs>
+            <rect x="4.5" y="4.5" width="15" height="15" rx="4" fill="url(#i-grid-tile)" class="m-edge"/>
+            <path d="M9.5 5v14M14.5 5v14M5 9.5h14M5 14.5h14" stroke="rgba(20,73,66,.48)" stroke-width="1.05"/>
+            <path d="M7.5 6.8h5.2" stroke="rgba(255,255,255,.72)" stroke-width="1.25" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button class="btn icon" type="button" data-grid="dots" aria-pressed="false" aria-label="Точки" title="Точки">
+          <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <defs>
+              <radialGradient id="i-dot-mint" cx="35%" cy="30%" r="70%">
+                <stop stop-color="#FFFFFF"/>
+                <stop offset=".38" stop-color="#7FFFD4"/>
+                <stop offset="1" stop-color="#10A37F"/>
+              </radialGradient>
+              <radialGradient id="i-dot-amber" cx="35%" cy="30%" r="70%">
+                <stop stop-color="#FFF8D6"/>
+                <stop offset="1" stop-color="#F9AB00"/>
+              </radialGradient>
+            </defs>
+            <circle cx="7" cy="7" r="2" fill="url(#i-dot-mint)" class="m-edge"/>
+            <circle cx="12" cy="12" r="2.15" fill="#D0BCFF" class="m-edge"/>
+            <circle cx="17" cy="7" r="1.75" fill="url(#i-dot-amber)" class="m-edge"/>
+            <circle cx="7" cy="17" r="1.75" fill="#A8C7FA" class="m-edge"/>
+            <circle cx="17" cy="17" r="2" fill="#FFB1C8" class="m-edge"/>
+          </svg>
+        </button>
+        <button class="btn icon" type="button" data-grid="lines" aria-pressed="false" aria-label="Линейка" title="Линейка">
+          <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="i-lines-card" x1="5" y1="4" x2="19" y2="20" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#FFF7D6"/>
+                <stop offset=".58" stop-color="#FFD966"/>
+                <stop offset="1" stop-color="#FFB74D"/>
+              </linearGradient>
+            </defs>
+            <rect x="5" y="4.5" width="14" height="15" rx="4" fill="url(#i-lines-card)" class="m-edge"/>
+            <path d="M8 9h8M8 12h8M8 15h8" stroke="rgba(92,59,18,.55)" stroke-width="1.35" stroke-linecap="round"/>
+            <path d="M8 7.1h5" stroke="rgba(255,255,255,.75)" stroke-width="1.25" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="group" aria-label="Файлы">
+      <button id="imgBtn" class="btn icon" type="button" aria-label="Добавить изображение" title="Добавить изображение">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="i-image-frame" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#EAF2FF"/>
+              <stop offset="1" stop-color="#A8C7FA"/>
+            </linearGradient>
+            <linearGradient id="i-image-hill" x1="7" y1="12" x2="18" y2="19" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#AEE8C8"/>
+              <stop offset="1" stop-color="#10A37F"/>
+            </linearGradient>
+          </defs>
+          <rect x="4.5" y="5" width="13.5" height="13.5" rx="3.2" fill="url(#i-image-frame)" class="m-edge"/>
+          <circle cx="8.7" cy="9.1" r="1.8" fill="#FFD966" class="m-edge"/>
+          <path d="m6.2 17 4.3-4.7 2.6 2.7 1.6-1.7 3.3 3.7H6.2Z" fill="url(#i-image-hill)"/>
+          <circle cx="17.4" cy="16.8" r="4.2" fill="#D0BCFF" class="m-edge"/>
+          <path d="M17.4 14.6V19M15.2 16.8h4.4" stroke="#4A336D" stroke-width="1.35" stroke-linecap="round"/>
+          <path d="M7 6.9h5" stroke="rgba(255,255,255,.72)" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="exportBtn" class="btn icon" type="button" aria-label="Экспортировать PNG" title="Экспортировать PNG">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="i-export-arrow" x1="12" y1="4" x2="12" y2="15" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#B8F7D4"/>
+              <stop offset="1" stop-color="#10A37F"/>
+            </linearGradient>
+            <linearGradient id="i-export-tray" x1="5" y1="13" x2="19" y2="21" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#E8EAED"/>
+              <stop offset="1" stop-color="#A8C7FA"/>
+            </linearGradient>
+          </defs>
+          <path d="M12 4.5v9.1" stroke="url(#i-export-arrow)" stroke-width="3" stroke-linecap="round"/>
+          <path d="m8.5 10.6 3.5 3.5 3.5-3.5" fill="none" stroke="#087A62" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M6 14.8v2.8c0 1 .8 1.9 1.9 1.9h8.2c1 0 1.9-.8 1.9-1.9v-2.8" fill="none" stroke="url(#i-export-tray)" stroke-width="3" stroke-linecap="round"/>
+          <path d="M8.4 17.4h7.2" stroke="rgba(255,255,255,.72)" stroke-width="1.1" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="group" aria-label="История">
+      <button id="undoBtn" class="btn icon" type="button" title="Отменить (Ctrl/Cmd+Z)" disabled aria-label="Отменить">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="i-undo" x1="5" y1="7" x2="19" y2="18" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#D0BCFF"/>
+              <stop offset="1" stop-color="#6750A4"/>
+            </linearGradient>
+          </defs>
+          <path d="M9.5 8.2 5.6 12l3.9 3.8" fill="none" stroke="url(#i-undo)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M6.4 12h6.8c3.1 0 5.1 1.9 5.1 4.5" fill="none" stroke="#6750A4" stroke-width="2.4" stroke-linecap="round"/>
+          <path d="M7.2 11.1h5.3" stroke="rgba(255,255,255,.7)" stroke-width="1.15" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="redoBtn" class="btn icon" type="button" title="Повторить (Ctrl/Cmd+Y)" disabled aria-label="Повторить">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="i-redo" x1="19" y1="7" x2="5" y2="18" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#A8C7FA"/>
+              <stop offset="1" stop-color="#0B57D0"/>
+            </linearGradient>
+          </defs>
+          <path d="m14.5 8.2 3.9 3.8-3.9 3.8" fill="none" stroke="url(#i-redo)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M17.6 12h-6.8c-3.1 0-5.1 1.9-5.1 4.5" fill="none" stroke="#0B57D0" stroke-width="2.4" stroke-linecap="round"/>
+          <path d="M16.8 11.1h-5.3" stroke="rgba(255,255,255,.7)" stroke-width="1.15" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="clearBtn" class="btn icon danger" type="button" aria-label="Очистить доску" title="Очистить доску">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="i-clear-bin" x1="7" y1="5" x2="17" y2="20" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#FFDAD6"/>
+              <stop offset=".55" stop-color="#FF8A80"/>
+              <stop offset="1" stop-color="#BA1A1A"/>
+            </linearGradient>
+          </defs>
+          <path d="M8 8.5h8l-.6 9.4c-.1 1-1 1.8-2 1.8h-2.8c-1 0-1.9-.8-2-1.8L8 8.5Z" fill="url(#i-clear-bin)" class="m-edge"/>
+          <path d="M7 7.2h10M10 7.2l.5-1.5h3l.5 1.5" fill="none" stroke="#7D1B1B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M10.2 11.1v5.1M13.8 11.1v5.1" stroke="rgba(125,27,27,.62)" stroke-width="1.25" stroke-linecap="round"/>
+          <path d="M9.8 9.5h4.8" stroke="rgba(255,255,255,.65)" stroke-width="1.1" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="group status" aria-label="Статус">
+      <div class="presence" title="Участников онлайн">
+        <span class="presence-dot" aria-hidden="true"></span>
+        <span id="userCount">0</span>
+        <span class="sr-only">онлайн</span>
+      </div>
+    </div>
+  </header>
+
+  <input id="fileInput" class="sr-only" type="file" accept="image/*">
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</main>
 
 <script type="module">
 import { BoardStorage } from './storage.js';
@@ -254,24 +670,28 @@ import { CanvasRenderer } from './canvas.js';
 import { NetworkManager } from './network.js';
 import { HistoryManager } from './history.js';
 import { ToolManager } from './tools.js';
-import { VoiceManager } from './voice.js';
 
 (function() {
   "use strict";
 
   const storage = new BoardStorage();
+
   const renderer = new CanvasRenderer(storage);
-  const network = new NetworkManager(storage, () => renderer.fullRender());
-  const history = new HistoryManager(storage, network, () => renderer.fullRender());
+  // Удалённые операции и undo/redo только помечают кадр «грязным» —
+  // фактическая перерисовка коалесится в один вызов на animation frame.
+  const network = new NetworkManager(
+    storage,
+    () => renderer.scheduleRender(),
+    (point) => renderer.focusWorldPoint(point)
+  );
+  network.onRemoteCursor = (clientId, point) => renderer.setRemoteCursor(clientId, point);
+  const history = new HistoryManager(storage, network, () => renderer.scheduleRender());
   const tools = new ToolManager(storage, renderer, network, history);
 
   network.init();
 
-  const voice = new VoiceManager(storage, network);
-  voice.initUI();
-
   // Expose globally for testing/debugging
-  window._board = { storage, renderer, network, history, tools, voice };
+  window._board = { storage, renderer, network, history, tools };
 })();
 </script>
 </body>

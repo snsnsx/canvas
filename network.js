@@ -1,7 +1,11 @@
+const EPHEMERAL_TYPES = new Set(['cursorMove', 'cursorLeave']);
+
 export class NetworkManager {
-  constructor(storage, onMessageReceived) {
+  constructor(storage, onMessageReceived, onRemoteFocus) {
     this.storage = storage;
     this.onMessageReceived = onMessageReceived; // callback to trigger rerender
+    this.onRemoteFocus = onRemoteFocus;
+    this.onRemoteCursor = null;
 
     this.socket = null;
     this.reconnectTimer = null;
@@ -14,10 +18,21 @@ export class NetworkManager {
     // Toast element for network status
     this.toastEl = document.getElementById('toast');
 
-    // Внешние слушатели (например, голосовая связь) на входящие сообщения
-    // и на (пере)открытие сокета.
-    this.messageListeners = [];
-    this.openListeners = [];
+    // Счётчик участников онлайн (обновляется сообщениями presence от сервера)
+    this.presenceEl = document.getElementById('userCount');
+
+    // Дебаунс резервной записи в localStorage (см. _scheduleLocalSave)
+    this._saveTimer = null;
+
+    this.activeClientId = null;
+    this.activeStrokeId = null;
+    this.focusPausedUntil = 0;
+    this.remoteWritingClients = new Set();
+    this.remoteStrokeLastPoint = new Map();
+    this.remoteCursorTimers = new Map();
+    this.remoteCursorResumeAt = new Map();
+    this.lastCursorSentAt = 0;
+    this.lastCursorPoint = null;
   }
 
   showToast(msg) {
@@ -26,6 +41,24 @@ export class NetworkManager {
     this.toastEl.classList.add('show');
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => this.toastEl.classList.remove('show'), 2000);
+  }
+
+  updatePresence(count) {
+    const n = Math.max(0, count | 0);
+    if (this.presenceEl) this.presenceEl.textContent = String(n);
+  }
+
+  pauseAutoFocus(ms = 3500) {
+    this.focusPausedUntil = Math.max(this.focusPausedUntil, Date.now() + ms);
+  }
+
+  focusRemotePoint(point, clientId, strokeId) {
+    if (!this.onRemoteFocus || !point) return;
+    if (Date.now() < this.focusPausedUntil) return;
+
+    this.activeClientId = clientId || null;
+    this.activeStrokeId = strokeId || null;
+    this.onRemoteFocus(point);
   }
 
   async init() {
@@ -80,7 +113,6 @@ export class NetworkManager {
       }
       // On reconnect, catch up state to ensure we are 100% in sync
       this.loadInitialState();
-      this.openListeners.forEach(fn => { try { fn(); } catch (e) { console.error('open listener:', e); } });
     };
 
     this.socket.onmessage = (event) => {
@@ -91,7 +123,6 @@ export class NetworkManager {
           return;
         }
         this.handleRemoteMessage(msg);
-        this.messageListeners.forEach(fn => { try { fn(msg); } catch (e) { console.error('msg listener:', e); } });
       } catch (err) {
         console.error("Error processing incoming WS message:", err);
       }
@@ -117,10 +148,6 @@ export class NetworkManager {
     }, 3000);
   }
 
-  // Подписки для внешних модулей (например, голосовой связи)
-  onMessage(fn) { if (typeof fn === 'function') this.messageListeners.push(fn); }
-  onOpen(fn) { if (typeof fn === 'function') this.openListeners.push(fn); }
-
   send(msg) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       const envelope = {
@@ -131,19 +158,96 @@ export class NetworkManager {
       };
       this.socket.send(JSON.stringify(envelope));
     } else {
-      // Local backup if server offline
+      // Local backup if server offline (сериализация отложена и коалесится)
       this.storage.dirty = true;
+      this._scheduleLocalSave();
+    }
+  }
+
+  sendEphemeral(msg) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify({
+      board: this.storage.boardId,
+      client: this.storage.clientId,
+      timestamp: Date.now(),
+      ...msg
+    }));
+  }
+
+  sendCursor(point) {
+    if (this.currentStrokeId || !point) return;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+
+    const now = Date.now();
+    const last = this.lastCursorPoint;
+    if (last && now - this.lastCursorSentAt < 60) {
+      const moved = Math.hypot(point.x - last.x, point.y - last.y);
+      if (moved < 4) return;
+    }
+
+    this.lastCursorSentAt = now;
+    this.lastCursorPoint = { x: point.x, y: point.y };
+    this.sendEphemeral({
+      type: 'cursorMove',
+      payload: { x: point.x, y: point.y }
+    });
+  }
+
+  sendCursorLeave() {
+    this.lastCursorPoint = null;
+    this.sendEphemeral({ type: 'cursorLeave', payload: {} });
+  }
+
+  setRemoteCursor(clientId, point) {
+    if (this.onRemoteCursor) this.onRemoteCursor(clientId, point);
+  }
+
+  clearRemoteCursorDelay(clientId) {
+    const timer = this.remoteCursorTimers.get(clientId);
+    if (timer) clearTimeout(timer);
+    this.remoteCursorTimers.delete(clientId);
+    this.remoteCursorResumeAt.delete(clientId);
+  }
+
+  scheduleRemoteCursor(clientId, point, delay = 450) {
+    if (!clientId || !point) return;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+
+    const showAt = Date.now() + delay;
+    this.remoteCursorResumeAt.set(clientId, showAt);
+    this.remoteStrokeLastPoint.set(clientId, point);
+
+    const oldTimer = this.remoteCursorTimers.get(clientId);
+    if (oldTimer) clearTimeout(oldTimer);
+
+    const timer = setTimeout(() => {
+      this.remoteCursorTimers.delete(clientId);
+      this.remoteCursorResumeAt.delete(clientId);
+      if (!this.remoteWritingClients.has(clientId)) {
+        this.setRemoteCursor(clientId, this.remoteStrokeLastPoint.get(clientId) || point);
+      }
+    }, delay);
+    this.remoteCursorTimers.set(clientId, timer);
+  }
+
+  // Резервное сохранение в localStorage с дебаунсом: убирает синхронную
+  // сериализацию всей доски на каждый исходящий пакет (например, точки штриха).
+  _scheduleLocalSave() {
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
       try {
         localStorage.setItem(this.storage.LS_KEY, this.storage.serialize());
-      } catch(_) {}
-    }
+      } catch (_) {}
+    }, 400);
   }
 
   // --- Buffering outgoing points (30-60 FPS) ---
 
   startStroke(strokeId, tool, color, size, startPoint) {
     this.currentStrokeId = strokeId;
-    this.bufferedPoints = [[startPoint.x, startPoint.y]];
+    this.bufferedPoints = [this.encodePoint(startPoint)];
+    this.lastCursorPoint = null;
 
     // Broadcast immediately the beginStroke event
     this.send({
@@ -153,7 +257,7 @@ export class NetworkManager {
         tool: tool,
         color: color,
         size: size,
-        points: [[startPoint.x, startPoint.y]]
+        points: [this.encodePoint(startPoint)]
       }
     });
 
@@ -164,7 +268,22 @@ export class NetworkManager {
   }
 
   bufferPoint(point) {
-    this.bufferedPoints.push([point.x, point.y]);
+    this.bufferedPoints.push(this.encodePoint(point));
+  }
+
+  encodePoint(point) {
+    const pressure = point.pressure ?? point.p;
+    if (Number.isFinite(pressure)) return [point.x, point.y, pressure];
+    return [point.x, point.y];
+  }
+
+  decodePoint(point) {
+    if (Array.isArray(point)) {
+      const decoded = { x: point[0], y: point[1] };
+      if (Number.isFinite(point[2])) decoded.pressure = point[2];
+      return decoded;
+    }
+    return point;
   }
 
   flushBufferedPoints() {
@@ -196,21 +315,40 @@ export class NetworkManager {
     }
     this.currentStrokeId = null;
 
-    // Save state in local storage too
-    try {
-      localStorage.setItem(this.storage.LS_KEY, this.storage.serialize());
-    } catch(_) {}
+    // Резервная копия доски в localStorage (отложенно, вне горячего пути)
+    this._scheduleLocalSave();
   }
 
   // --- Handling Remote Operations ---
 
   handleRemoteMessage(msg) {
-    // Сигналинг WebRTC обрабатывается голосовым модулем и на доску не влияет.
-    if (msg.type && msg.type.indexOf('rtc-') === 0) return;
+    if (EPHEMERAL_TYPES.has(msg.type)) {
+      if (msg.type === 'cursorMove' && !this.remoteWritingClients.has(msg.client)) {
+        const payload = msg.payload || {};
+        const point = {
+          x: Number(payload.x),
+          y: Number(payload.y)
+        };
+        const resumeAt = this.remoteCursorResumeAt.get(msg.client) || 0;
+        if (Date.now() < resumeAt) {
+          this.scheduleRemoteCursor(msg.client, point, resumeAt - Date.now());
+        } else {
+          this.setRemoteCursor(msg.client, point);
+        }
+      } else if (msg.type === 'cursorLeave') {
+        this.clearRemoteCursorDelay(msg.client);
+        this.setRemoteCursor(msg.client, null);
+      }
+      return;
+    }
+
     switch (msg.type) {
       case 'beginStroke': {
         const payload = msg.payload;
-        const pts = (payload.points || []).map(p => ({ x: p[0], y: p[1] }));
+        const pts = (payload.points || []).map(p => this.decodePoint(p));
+        this.clearRemoteCursorDelay(msg.client);
+        this.remoteWritingClients.add(msg.client);
+        this.setRemoteCursor(msg.client, null);
         const stroke = {
           id: payload.strokeId,
           tool: payload.tool,
@@ -220,21 +358,39 @@ export class NetworkManager {
         };
         this.storage.computeBBox(stroke);
         this.storage.strokes.push(stroke);
+        this.storage.extendBottom(stroke);
+        const lastPt = pts[pts.length - 1];
+        if (lastPt) this.remoteStrokeLastPoint.set(msg.client, lastPt);
+        this.focusRemotePoint(lastPt, msg.client, payload.strokeId);
         break;
       }
       case 'appendPoints': {
         const payload = msg.payload;
         const stroke = this.storage.strokes.find(s => s.id === payload.strokeId);
         if (stroke) {
-          const newPts = payload.points.map(p => ({ x: p[0], y: p[1] }));
+          const newPts = payload.points.map(p => this.decodePoint(p));
+          this.clearRemoteCursorDelay(msg.client);
+          this.remoteWritingClients.add(msg.client);
+          this.setRemoteCursor(msg.client, null);
           stroke.points.push(...newPts);
-          this.storage.computeBBox(stroke);
-          this.storage.extendBottom(stroke);
+          // Обновляем bbox и границу только по новым точкам, а не по всему штриху.
+          this.storage.extendBBox(stroke, newPts);
+          this.storage.extendBottomPoints(newPts);
+          const lastPt = newPts[newPts.length - 1];
+          if (lastPt) this.remoteStrokeLastPoint.set(msg.client, lastPt);
+          this.focusRemotePoint(lastPt, msg.client, payload.strokeId);
         }
         break;
       }
       case 'endStroke': {
         // Stroke complete. Bounding boxes already handled.
+        const payload = msg.payload;
+        if (payload && payload.strokeId === this.activeStrokeId) {
+          this.activeClientId = null;
+          this.activeStrokeId = null;
+        }
+        this.remoteWritingClients.delete(msg.client);
+        this.scheduleRemoteCursor(msg.client, this.remoteStrokeLastPoint.get(msg.client) || null);
         break;
       }
       case 'deleteObject': {
@@ -344,6 +500,11 @@ export class NetworkManager {
           this.handleRemoteMessage(msg.payload.op);
         }
         break;
+      }
+      case 'presence': {
+        // Только обновляем счётчик участников — перерисовка холста не нужна.
+        this.updatePresence(msg.count);
+        return;
       }
     }
 

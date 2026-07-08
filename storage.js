@@ -1,7 +1,8 @@
+export const BOARD_W = 1024;                  // единая ширина холста (мировые px) для всех участников
 export const CELL = 32;                       // шаг сетки (мировые px)
 export const HL_ALPHA = 0.32;                 // прозрачность маркера
-export const DEFAULT_PEN = ['#1f1f42','#dc2626','#14992f'];   // 3 быстрых цвета ручки
-export const DEFAULT_HL  = ['#fde047','#86efac'];             // 2 цвета маркера
+export const DEFAULT_PEN = ['#1d1d1d','#e03131','#2f9e44'];   // 3 быстрых цвета ручки
+export const DEFAULT_HL  = ['#fde047','#7f46a4'];             // 2 цвета маркера
 export const SIZE_PRESETS = {                 // пресеты толщины по инструментам
   pen:[2,3.5,6], highlighter:[14,22,30], eraser:[16,28,46]
 };
@@ -28,7 +29,7 @@ export class BoardStorage {
     this.penIdx = 0;
     this.hlIdx = 0;            // выбранный быстрый цвет
     this.sizeIdx = Object.assign({}, SIZE_DEFAULT);
-    this.gridType = 'grid';                 // none | grid | dots | lines
+    this.gridType = 'none';                 // none | grid | dots | lines
 
     this.strokes = [];                      // [{id, tool, color, size, points:[{x,y}], minY, maxY}]
     this.images  = [];                      // [{id, src, img, x, y, w, h}]
@@ -128,6 +129,24 @@ export class BoardStorage {
       }
     } else if (s.y !== undefined && s.h !== undefined) {
       if (s.y + s.h > this.contentBottom) this.contentBottom = s.y + s.h;
+    }
+  }
+
+  // Инкрементальное расширение bbox штриха только по новым точкам —
+  // без повторного обхода всех точек (важно для «живого» удалённого штриха).
+  extendBBox(s, pts) {
+    if (s.minY === undefined || s.maxY === undefined) { this.computeBBox(s); return; }
+    for (const p of pts) {
+      const lo = p.y - s.size, hi = p.y + s.size;
+      if (lo < s.minY) s.minY = lo;
+      if (hi > s.maxY) s.maxY = hi;
+    }
+  }
+
+  // Рост нижней границы содержимого только по переданным точкам.
+  extendBottomPoints(pts) {
+    for (const p of pts) {
+      if (p.y > this.contentBottom) this.contentBottom = p.y;
     }
   }
 
