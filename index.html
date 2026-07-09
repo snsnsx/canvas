@@ -313,17 +313,30 @@
   }
 
   .presence {
+    border: 0;
     min-height: var(--control);
+    min-width: 58px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
-    padding: 0 8px;
+    padding: 0 12px;
     border-radius: 999px;
     background: rgba(21, 21, 21, 0.045);
     color: var(--muted);
     font-size: 13px;
     font-weight: 560;
     white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, transform 120ms ease;
+  }
+
+  .presence:hover {
+    background: rgba(21, 21, 21, 0.065);
+  }
+
+  .presence:active {
+    transform: translateY(1px);
   }
 
   .presence-dot {
@@ -652,11 +665,11 @@
     </div>
 
     <div class="group status" aria-label="Статус">
-      <div class="presence" title="Участников онлайн">
+      <button id="presenceBtn" class="presence" type="button" title="Обновить страницу" aria-label="Обновить страницу">
         <span class="presence-dot" aria-hidden="true"></span>
         <span id="userCount">0</span>
         <span class="sr-only">онлайн</span>
-      </div>
+      </button>
     </div>
   </header>
 
@@ -687,6 +700,7 @@ import { ToolManager } from './tools.js';
   network.onRemoteCursor = (clientId, point) => renderer.setRemoteCursor(clientId, point);
   const history = new HistoryManager(storage, network, () => renderer.scheduleRender());
   const tools = new ToolManager(storage, renderer, network, history);
+  document.getElementById('presenceBtn')?.addEventListener('click', () => window.location.reload());
 
   network.init();
 
