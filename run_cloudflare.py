@@ -161,11 +161,13 @@ def main():
     print()
 
     try:
-        while True:
+        for i in range(12 * 90):
             if cloudflare.poll() is not None:
                 raise RuntimeError("Cloudflare Tunnel завершился.")
 
             time.sleep(5)
+        cloudflare.terminate()
+        cloudflare.kill()
 
     except KeyboardInterrupt:
         print("\nОстановка...")
