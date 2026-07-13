@@ -29,6 +29,7 @@ export class CanvasRenderer {
     this.cssCache = {};
 
     this.activeStroke = null;   // штрих в процессе рисования (доносится поверх кэша)
+    this.lassoPath = null;      // активный контур лассо в мировых координатах
     this.remoteCursors = new Map();
     this._raf = null;           // id запланированного кадра рендера
     this._focusRAF = null;
@@ -515,16 +516,54 @@ export class CanvasRenderer {
 
   renderOverlay() {
     this.ovCtx.clearRect(0, 0, this.W, this.H);
+    const ctx = this.ovCtx;
+    const accent = this.getCSS('--accent');
+
+    if (this.lassoPath && this.lassoPath.length) {
+      const k = this.scale;
+      ctx.save();
+      ctx.strokeStyle = accent;
+      ctx.fillStyle = 'rgba(16, 163, 127, 0.08)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath();
+      this.lassoPath.forEach((p, i) => {
+        const x = p.x * k;
+        const y = (p.y - this.storage.cameraY) * k;
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      });
+      if (this.lassoPath.length > 2) ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const groupBounds = this.selectionBounds(this.storage.selection);
+    if (groupBounds) {
+      const k = this.scale;
+      const x = groupBounds.x * k;
+      const y = (groupBounds.y - this.storage.cameraY) * k;
+      const w = groupBounds.w * k;
+      const h = groupBounds.h * k;
+      ctx.save();
+      ctx.strokeStyle = accent;
+      ctx.fillStyle = 'rgba(16, 163, 127, 0.055)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([7, 5]);
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+      this.drawDeleteHandle(ctx, x + w + 14, y - 14, accent);
+      ctx.restore();
+    }
+
     const sel = this.storage.selected;
     if (sel) {
-      const ctx = this.ovCtx;
       const k = this.scale;
       // мир → экран: рамка масштабируется, а ручки ниже — фиксированного размера
       const x = sel.x * k;
       const y = (sel.y - this.storage.cameraY) * k;
       const w = sel.w * k, h = sel.h * k;
-      const accent = this.getCSS('--accent');
-
       ctx.save();
 
       // рамка выделения
@@ -554,25 +593,47 @@ export class CanvasRenderer {
       ctx.stroke();
 
       // — кнопка удаления (правый-верхний угол), крупная —
-      const DR = 12; // радиус → 24px
-      ctx.beginPath();
-      ctx.arc(x + w, y, DR, 0, Math.PI * 2);
-      ctx.fillStyle = this.getCSS('--ui-strong');
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(x + w - 4.5, y - 4.5);
-      ctx.lineTo(x + w + 4.5, y + 4.5);
-      ctx.moveTo(x + w + 4.5, y - 4.5);
-      ctx.lineTo(x + w - 4.5, y + 4.5);
-      ctx.stroke();
+      this.drawDeleteHandle(ctx, x + w, y, accent);
 
       ctx.restore();
     }
     this.drawRemoteCursors(this.ovCtx);
     this.updateScrollbar();
+  }
+
+  selectionBounds(selection) {
+    if (!selection) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of selection.strokes || []) {
+      for (const p of s.points || []) {
+        const x = p.x !== undefined ? p.x : p[0];
+        const y = p.y !== undefined ? p.y : p[1];
+        minX = Math.min(minX, x - s.size / 2);
+        minY = Math.min(minY, y - s.size / 2);
+        maxX = Math.max(maxX, x + s.size / 2);
+        maxY = Math.max(maxY, y + s.size / 2);
+      }
+    }
+    for (const im of selection.images || []) {
+      minX = Math.min(minX, im.x); minY = Math.min(minY, im.y);
+      maxX = Math.max(maxX, im.x + im.w); maxY = Math.max(maxY, im.y + im.h);
+    }
+    if (!Number.isFinite(minX)) return null;
+    return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+  }
+
+  drawDeleteHandle(ctx, x, y) {
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = this.getCSS('--ui-strong');
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - 4.5, y - 4.5); ctx.lineTo(x + 4.5, y + 4.5);
+    ctx.moveTo(x + 4.5, y - 4.5); ctx.lineTo(x - 4.5, y + 4.5);
+    ctx.stroke();
   }
 
   roundRect(ctx, x, y, w, h, r) {

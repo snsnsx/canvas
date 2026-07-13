@@ -25,7 +25,7 @@ export class BoardStorage {
 
     this.penColors = DEFAULT_PEN.slice();
     this.hlColors  = DEFAULT_HL.slice();
-    this.tool = 'pen';                      // pen | highlighter | eraser | select
+    this.tool = 'pen';                      // pen | highlighter | eraser | lasso | select
     this.penIdx = 0;
     this.hlIdx = 0;            // выбранный быстрый цвет
     this.sizeIdx = Object.assign({}, SIZE_DEFAULT);
@@ -36,6 +36,7 @@ export class BoardStorage {
     this.contentBottom = 0;                 // нижняя граница содержимого (мир)
     this.cameraY = 0;                       // смещение «камеры» вниз (мир)
     this.selected = null;                   // выбранное изображение
+    this.selection = null;                  // групповое выделение лассо: {strokes, images}
     this.dirty = false;
   }
 
@@ -118,6 +119,7 @@ export class BoardStorage {
     });
 
     this.selected = null;
+    this.selection = null;
     this.recomputeContentBottom();
     return true;
   }

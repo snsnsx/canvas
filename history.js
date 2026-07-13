@@ -119,6 +119,24 @@ export class HistoryManager {
         });
         break;
       }
+      case 'batch_delete': {
+        for (const item of action.items) {
+          if (item.objectType === 'stroke') this.storage.strokes.push(item.objectData);
+          else this.storage.images.push(item.objectData);
+          this.sendRestore(item.objectData, item.objectType);
+        }
+        break;
+      }
+      case 'batch_move': {
+        for (const item of action.items) {
+          this.applySnapshot(item, item.before);
+          const object = item.objectType === 'stroke'
+            ? this.storage.strokes.find(s => s.id === item.id)
+            : this.storage.images.find(im => im.id === item.id);
+          if (object) this.sendRestore(object, item.objectType);
+        }
+        break;
+      }
     }
 
     this.redoStack.push(action);
@@ -205,6 +223,25 @@ export class HistoryManager {
         };
         break;
       }
+      case 'batch_delete': {
+        for (const item of action.items) {
+          const list = item.objectType === 'stroke' ? this.storage.strokes : this.storage.images;
+          const idx = list.findIndex(object => object.id === item.id);
+          if (idx >= 0) list.splice(idx, 1);
+          this.network.send({ type: 'deleteObject', payload: { objectId: item.id } });
+        }
+        break;
+      }
+      case 'batch_move': {
+        for (const item of action.items) {
+          this.applySnapshot(item, item.after);
+          const object = item.objectType === 'stroke'
+            ? this.storage.strokes.find(s => s.id === item.id)
+            : this.storage.images.find(im => im.id === item.id);
+          if (object) this.sendRestore(object, item.objectType);
+        }
+        break;
+      }
     }
 
     this.undoStack.push(action);
@@ -218,5 +255,28 @@ export class HistoryManager {
         payload: { op }
       });
     }
+  }
+
+  applySnapshot(item, snapshot) {
+    if (item.objectType === 'stroke') {
+      const stroke = this.storage.strokes.find(s => s.id === item.id);
+      if (!stroke) return;
+      stroke.points = snapshot.points.map(p => ({ ...p }));
+      this.storage.computeBBox(stroke);
+      return;
+    }
+    const image = this.storage.images.find(im => im.id === item.id);
+    if (!image) return;
+    image.x = snapshot.x;
+    image.y = snapshot.y;
+    image.w = snapshot.w;
+    image.h = snapshot.h;
+  }
+
+  sendRestore(object, objectType) {
+    const data = objectType === 'stroke'
+      ? { id: object.id, type: 'stroke', tool: object.tool, color: object.color, size: object.size, points: object.points }
+      : { id: object.id, type: 'image', src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
+    this.network.send({ type: 'restoreObject', payload: { objectId: object.id, data } });
   }
 }

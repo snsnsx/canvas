@@ -32,6 +32,11 @@ export class ToolManager {
     this.dragOff = { x: 0, y: 0 };
     this.dragStart = null;
 
+    this.lassoPid = null;
+    this.lassoMode = null;
+    this.lassoStart = null;
+    this.lassoOriginal = null;
+
     this.sbTimer = null;
 
     this.fileInput = document.getElementById('fileInput');
@@ -79,18 +84,33 @@ export class ToolManager {
       this.storage.tool = 'eraser';
       this.syncTools();
     });
-    document.querySelectorAll('#gridSeg .btn').forEach(b => {
-      b.addEventListener('click', () => {
-        this.storage.gridType = b.dataset.grid;
-        this.syncTools();
-        this.renderer.renderBack();
+    document.getElementById('lassoBtn').addEventListener('click', () => {
+      this.storage.tool = 'lasso';
+      this.storage.selected = null;
+      this.syncTools();
+    });
 
-        // Broadcast grid change
-        this.network.send({
-          type: 'changeGrid',
-          payload: { grid: this.storage.gridType }
-        });
+    const gridBtn = document.getElementById('gridBtn');
+    const gridMenu = document.getElementById('gridMenu');
+    gridBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = !gridMenu.classList.contains('open');
+      gridMenu.classList.toggle('open', open);
+      gridBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) this.positionGridMenu();
+    });
+    document.querySelectorAll('#gridMenu .btn').forEach(b => {
+      b.addEventListener('click', () => {
+        this.setGrid(b.dataset.grid);
+        gridMenu.classList.remove('open');
+        gridBtn.setAttribute('aria-expanded', 'false');
       });
+    });
+    document.addEventListener('pointerdown', (e) => {
+      if (!gridMenu.contains(e.target) && e.target !== gridBtn) {
+        gridMenu.classList.remove('open');
+        gridBtn.setAttribute('aria-expanded', 'false');
+      }
     });
 
     document.getElementById('undoBtn').addEventListener('click', () => this.history.undo());
@@ -98,6 +118,7 @@ export class ToolManager {
     document.getElementById('clearBtn').addEventListener('click', () => this.clearBoard());
     document.getElementById('imgBtn').addEventListener('click', () => this.fileInput.click());
     document.getElementById('exportBtn').addEventListener('click', () => this.exportPNG());
+    window.addEventListener('gridChanged', () => this.syncTools());
 
     // Image Upload
     this.fileInput.addEventListener('change', (e) => {
@@ -209,8 +230,8 @@ export class ToolManager {
       b.setAttribute('aria-pressed', 'false');
       b.innerHTML = `<span class="pip" style="width:${px}px;height:${px}px"></span>`;
       b.addEventListener('click', () => {
-        const t = (this.storage.tool === 'select') ? 'pen' : this.storage.tool;
-        if (this.storage.tool === 'select') {
+        const t = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
+        if (this.storage.tool === 'select' || this.storage.tool === 'lasso') {
           this.storage.tool = 'pen';
         }
         this.storage.sizeIdx[t] = i;
@@ -221,6 +242,11 @@ export class ToolManager {
   }
 
   syncTools() {
+    if (this.storage.tool !== 'lasso' && this.storage.selection) {
+      this.storage.selection = null;
+      this.renderer.lassoPath = null;
+      this.renderer.renderOverlay();
+    }
     document.querySelectorAll('#penColors .swatch').forEach((b, i) => {
       const selected = this.storage.tool === 'pen' && i === this.storage.penIdx;
       b.classList.toggle('sel', selected);
@@ -239,20 +265,50 @@ export class ToolManager {
       eraserBtn.setAttribute('aria-pressed', selected ? 'true' : 'false');
     }
 
-    const st = (this.storage.tool === 'select') ? 'pen' : this.storage.tool;
+    const lassoBtn = document.getElementById('lassoBtn');
+    if (lassoBtn) {
+      const selected = this.storage.tool === 'lasso';
+      lassoBtn.classList.toggle('on', selected);
+      lassoBtn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
+
+    const st = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
     document.querySelectorAll('#sizes .size').forEach((b, i) => {
       const selected = i === this.storage.sizeIdx[st];
       b.classList.toggle('sel', selected);
       b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
-    document.querySelectorAll('#gridSeg .btn').forEach(b => {
+    document.querySelectorAll('#gridMenu .btn').forEach(b => {
       const selected = b.dataset.grid === this.storage.gridType;
       b.classList.toggle('on', selected);
       b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
+    const currentGrid = document.querySelector(`#gridMenu .btn[data-grid="${this.storage.gridType}"]`);
+    const gridIcon = document.getElementById('gridIcon');
+    if (currentGrid && gridIcon) gridIcon.innerHTML = currentGrid.querySelector('svg').innerHTML;
+    const gridBtn = document.getElementById('gridBtn');
+    if (gridBtn && currentGrid) gridBtn.title = `Фон: ${currentGrid.title}`;
     if (this.storage.tool !== 'eraser') this.hideEraserCursor();
+    this.stage.classList.toggle('lasso', this.storage.tool === 'lasso');
     // Выделение изображения больше не привязано к инструменту «выделение»:
     // им можно управлять в любом инструменте, поэтому здесь его не сбрасываем.
+  }
+
+  positionGridMenu() {
+    const btn = document.getElementById('gridBtn');
+    const menu = document.getElementById('gridMenu');
+    if (!btn || !menu) return;
+    const r = btn.getBoundingClientRect();
+    const menuW = menu.offsetWidth || 146;
+    menu.style.left = `${Math.max(8, Math.min(innerWidth - menuW - 8, r.right - menuW))}px`;
+    menu.style.top = `${Math.min(innerHeight - 48, r.bottom + 8)}px`;
+  }
+
+  setGrid(grid) {
+    this.storage.gridType = grid;
+    this.syncTools();
+    this.renderer.renderBack();
+    this.network.send({ type: 'changeGrid', payload: { grid } });
   }
 
   attachLongPress(el, cb) {
@@ -316,7 +372,10 @@ export class ToolManager {
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (this.storage.selected) {
+      if (this.storage.selection) {
+        e.preventDefault();
+        this.deleteLassoSelection();
+      } else if (this.storage.selected) {
         e.preventDefault();
         this.deleteSelected();
       }
@@ -328,6 +387,12 @@ export class ToolManager {
       case 'p': this.storage.tool = 'pen'; this.syncTools(); break;
       case 'h': this.storage.tool = 'highlighter'; this.syncTools(); break;
       case 'e': this.storage.tool = 'eraser'; this.syncTools(); break;
+      case 'l':
+        this.storage.tool = 'lasso';
+        this.storage.selected = null;
+        this.syncTools();
+        this.renderer.renderOverlay();
+        break;
       case 'arrowup':
         this.network.pauseAutoFocus();
         this.renderer.stopFocus();
@@ -384,7 +449,7 @@ export class ToolManager {
 
   sendIdleCursor(e) {
     if (!this.isDrawingPointer(e)) return;
-    if (this.drawPid !== null || this.dragPid !== null || this.panPid !== null) return;
+    if (this.drawPid !== null || this.dragPid !== null || this.panPid !== null || this.lassoPid !== null) return;
     if (e.buttons && e.buttons !== 0) return;
     this.network.sendCursor(this.pointerWorld(e));
   }
@@ -395,6 +460,14 @@ export class ToolManager {
     if (e.pointerType === 'pen') this.penActive = true;
     this.updateEraserCursor(e);
     if (this.isDrawingPointer(e)) this.network.sendCursorLeave();
+
+    if (this.storage.tool === 'lasso') {
+      if (e.pointerType === 'touch' && this.penActive) return;
+      if (this.lassoPid !== null || this.dragPid !== null || this.drawPid !== null) return;
+      this.overlay.setPointerCapture(e.pointerId);
+      this.beginLasso(e);
+      return;
+    }
 
     // Режим «выделение»: перо/мышь управляют изображениями
     if (this.storage.tool === 'select' && this.isDrawingPointer(e)) {
@@ -435,6 +508,10 @@ export class ToolManager {
       this.moveSelect(e);
       return;
     }
+    if (e.pointerId === this.lassoPid) {
+      this.moveLasso(e);
+      return;
+    }
     this.sendIdleCursor(e);
   }
 
@@ -443,6 +520,7 @@ export class ToolManager {
     if (e.pointerId === this.drawPid) this.endStroke();
     if (e.pointerId === this.panPid) this.endPan();
     if (e.pointerId === this.dragPid) this.endSelect();
+    if (e.pointerId === this.lassoPid) this.endLasso();
     this.sendIdleCursor(e);
   }
 
@@ -453,6 +531,10 @@ export class ToolManager {
     // Рисование снимает выделение изображения
     if (this.storage.selected) {
       this.storage.selected = null;
+      this.renderer.renderOverlay();
+    }
+    if (this.storage.selection) {
+      this.storage.selection = null;
       this.renderer.renderOverlay();
     }
 
@@ -676,6 +758,157 @@ export class ToolManager {
         this.hideScrollbarLater();
       }
     });
+  }
+
+  // --- Lasso selection (strokes + images) ---
+
+  beginLasso(e) {
+    const world = this.pointerWorld(e);
+    const screen = this.pointerPos(e);
+    const bounds = this.renderer.selectionBounds(this.storage.selection);
+    this.lassoPid = e.pointerId;
+
+    if (bounds) {
+      const k = this.renderer.scale;
+      const deleteX = (bounds.x + bounds.w) * k + 14;
+      const deleteY = (bounds.y - this.storage.cameraY) * k - 14;
+      if (Math.hypot(screen.sx - deleteX, screen.sy - deleteY) <= 17) {
+        this.deleteLassoSelection();
+        this.lassoPid = null;
+        return;
+      }
+      if (world.x >= bounds.x && world.x <= bounds.x + bounds.w && world.y >= bounds.y && world.y <= bounds.y + bounds.h) {
+        this.lassoMode = 'move';
+        this.lassoStart = world;
+        this.lassoOriginal = this.snapshotSelection(this.storage.selection);
+        return;
+      }
+    }
+
+    this.storage.selection = null;
+    this.lassoMode = 'draw';
+    this.lassoStart = world;
+    this.renderer.lassoPath = [world];
+    this.renderer.renderOverlay();
+  }
+
+  moveLasso(e) {
+    const world = this.pointerWorld(e);
+    if (this.lassoMode === 'draw') {
+      const path = this.renderer.lassoPath;
+      const last = path[path.length - 1];
+      if (!last || Math.hypot(world.x - last.x, world.y - last.y) >= 2 / this.renderer.scale) {
+        path.push(world);
+        this.renderer.renderOverlay();
+      }
+      return;
+    }
+    if (this.lassoMode !== 'move' || !this.lassoOriginal) return;
+    const dx = world.x - this.lassoStart.x;
+    const dy = world.y - this.lassoStart.y;
+    for (const item of this.lassoOriginal) {
+      if (item.objectType === 'stroke') {
+        item.object.points = item.before.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy }));
+        this.storage.computeBBox(item.object);
+      } else {
+        item.object.x = item.before.x + dx;
+        item.object.y = item.before.y + dy;
+      }
+    }
+    this.renderer.fullRender();
+  }
+
+  endLasso() {
+    if (this.lassoMode === 'draw') {
+      const path = this.renderer.lassoPath || [];
+      if (path.length >= 3) {
+        const strokes = this.storage.strokes.filter(s => (s.points || []).some(p => this.pointInPolygon(p, path)));
+        const images = this.storage.images.filter(im => this.pointInPolygon({ x: im.x + im.w / 2, y: im.y + im.h / 2 }, path));
+        this.storage.selection = (strokes.length || images.length) ? { strokes, images } : null;
+      }
+      this.renderer.lassoPath = null;
+    } else if (this.lassoMode === 'move' && this.lassoOriginal) {
+      const items = this.lassoOriginal.map(item => ({
+        id: item.object.id,
+        objectType: item.objectType,
+        before: item.before,
+        after: item.objectType === 'stroke'
+          ? { points: this.cloneStrokePoints(item.object.points) }
+          : { x: item.object.x, y: item.object.y, w: item.object.w, h: item.object.h }
+      }));
+      const changed = items.some(item => item.objectType === 'stroke'
+        ? item.before.points.some((p, i) => p.x !== item.after.points[i].x || p.y !== item.after.points[i].y)
+        : item.before.x !== item.after.x || item.before.y !== item.after.y);
+      if (changed) {
+        this.storage.recomputeContentBottom();
+        this.history.push({ type: 'batch_move', items });
+        for (const item of this.lassoOriginal) this.broadcastRestore(item.object, item.objectType);
+      }
+    }
+    this.lassoMode = null;
+    this.lassoPid = null;
+    this.lassoStart = null;
+    this.lassoOriginal = null;
+    this.renderer.fullRender();
+  }
+
+  pointInPolygon(point, polygon) {
+    const px = point.x !== undefined ? point.x : point[0];
+    const py = point.y !== undefined ? point.y : point[1];
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const a = polygon[i], b = polygon[j];
+      const intersects = ((a.y > py) !== (b.y > py))
+        && (px < (b.x - a.x) * (py - a.y) / ((b.y - a.y) || 1e-9) + a.x);
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  }
+
+  snapshotSelection(selection) {
+    const items = [];
+    for (const s of selection.strokes || []) {
+      items.push({ object: s, objectType: 'stroke', before: { points: this.cloneStrokePoints(s.points) } });
+    }
+    for (const im of selection.images || []) {
+      items.push({ object: im, objectType: 'image', before: { x: im.x, y: im.y, w: im.w, h: im.h } });
+    }
+    return items;
+  }
+
+  cloneStrokePoints(points) {
+    return (points || []).map(p => Array.isArray(p)
+      ? { x: p[0], y: p[1], pressure: p[2] }
+      : { ...p });
+  }
+
+  broadcastRestore(object, objectType) {
+    const data = objectType === 'stroke'
+      ? { id: object.id, type: 'stroke', tool: object.tool, color: object.color, size: object.size, points: object.points }
+      : { id: object.id, type: 'image', src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
+    this.network.send({ type: 'restoreObject', payload: { objectId: object.id, data } });
+  }
+
+  deleteLassoSelection() {
+    const selection = this.storage.selection;
+    if (!selection) return;
+    const items = [];
+    for (const s of selection.strokes || []) {
+      items.push({ id: s.id, objectType: 'stroke', objectData: s });
+      const idx = this.storage.strokes.indexOf(s);
+      if (idx >= 0) this.storage.strokes.splice(idx, 1);
+      this.network.send({ type: 'deleteObject', payload: { objectId: s.id } });
+    }
+    for (const im of selection.images || []) {
+      items.push({ id: im.id, objectType: 'image', objectData: im });
+      const idx = this.storage.images.indexOf(im);
+      if (idx >= 0) this.storage.images.splice(idx, 1);
+      this.network.send({ type: 'deleteObject', payload: { objectId: im.id } });
+    }
+    this.storage.selection = null;
+    this.storage.recomputeContentBottom();
+    if (items.length) this.history.push({ type: 'batch_delete', items });
+    this.renderer.fullRender();
   }
 
   // --- Image Selector / Drag / Resize ---
@@ -928,6 +1161,7 @@ export class ToolManager {
     this.storage.strokes = [];
     this.storage.images = [];
     this.storage.selected = null;
+    this.storage.selection = null;
     this.storage.contentBottom = 0;
     this.storage.cameraY = 0;
     this.renderer.fullRender();

@@ -404,6 +404,7 @@ export class NetworkManager {
             this.storage.images.splice(iIdx, 1);
           }
         }
+        this.storage.selection = null;
         this.storage.recomputeContentBottom();
         break;
       }
@@ -445,6 +446,7 @@ export class NetworkManager {
             this.storage.images.push(img);
           }
         }
+        this.storage.selection = null;
         this.storage.recomputeContentBottom();
         break;
       }
@@ -479,12 +481,14 @@ export class NetworkManager {
       }
       case 'changeGrid': {
         this.storage.gridType = msg.payload.grid;
+        window.dispatchEvent(new CustomEvent('gridChanged'));
         break;
       }
       case 'clearBoard': {
         this.storage.strokes = [];
         this.storage.images = [];
         this.storage.selected = null;
+        this.storage.selection = null;
         this.storage.contentBottom = 0;
         this.storage.cameraY = 0;
         break;
