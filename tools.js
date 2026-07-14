@@ -172,6 +172,10 @@ export class ToolManager {
       document.addEventListener(ev, e => e.preventDefault());
     });
     document.addEventListener('dblclick', e => e.preventDefault());
+
+    // Ладонь, лежащая на планшете во время письма пером, не должна запускать
+    // нативное выделение содержимого страницы (страховка к user-select: none).
+    this.stage.addEventListener('selectstart', e => e.preventDefault());
   }
 
   // --- Swatches & Size UI Builders ---
@@ -284,10 +288,8 @@ export class ToolManager {
       b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
     const currentGrid = document.querySelector(`#gridMenu .btn[data-grid="${this.storage.gridType}"]`);
-    const gridIcon = document.getElementById('gridIcon');
-    if (currentGrid && gridIcon) gridIcon.innerHTML = currentGrid.querySelector('svg').innerHTML;
     const gridBtn = document.getElementById('gridBtn');
-    if (gridBtn && currentGrid) gridBtn.title = `Фон: ${currentGrid.title}`;
+    if (gridBtn && currentGrid) gridBtn.title = `Настройки фона: ${currentGrid.title}`;
     if (this.storage.tool !== 'eraser') this.hideEraserCursor();
     this.stage.classList.toggle('lasso', this.storage.tool === 'lasso');
     // Выделение изображения больше не привязано к инструменту «выделение»:
@@ -476,9 +478,12 @@ export class ToolManager {
       return;
     }
 
-    // Инструменты рисования: перо/мышь рисуют
+    // Инструменты рисования: перо/мышь рисуют. Но если есть выделенное
+    // изображение и попали в его ручки или тело — двигаем/масштабируем/удаляем.
+    // Управление картинкой доступно в любом инструменте, как и для пальца.
     if (this.isDrawingPointer(e)) {
       this.overlay.setPointerCapture(e.pointerId);
+      if (this.storage.selected && this.beginImageDrag(e)) return;
       this.startStroke(e);
       return;
     }
