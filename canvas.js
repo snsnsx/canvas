@@ -237,6 +237,7 @@ export class CanvasRenderer {
 
       ctx.save();
       ctx.translate(x, y);
+      ctx.scale(0.63, 0.63);
       ctx.fillStyle = cursor.color;
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
