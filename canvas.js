@@ -1,4 +1,4 @@
-import { CELL, HL_ALPHA, BOARD_W, PAGE_H } from './storage.js';
+import { HL_ALPHA, BOARD_W, PAGE_H } from './storage.js';
 
 // Небольшой запас прокрутки ниже конца страницы, чтобы граница листа
 // (разделитель + фон приложения) была видна — лист ощущается ограниченным.
@@ -268,61 +268,6 @@ export class CanvasRenderer {
     }
   }
 
-  // maxWorldY ограничивает сетку по высоте страницы (в живом виде — PAGE_H).
-  drawGrid(ctx, camY, w, h, maxWorldY = Infinity) {
-    if (this.storage.gridType === 'none') return;
-    ctx.save();
-
-    const startY = Math.floor(camY / CELL) * CELL;
-    const endY = Math.min(camY + h, maxWorldY);          // нижняя граница по миру
-    const vBottom = Math.min(h, maxWorldY - camY);        // низ вертикалей на экране
-
-    if (this.storage.gridType === 'lines') {
-      // линейка — горизонтальные линии, прокручиваются по Y (единый путь)
-      ctx.strokeStyle = this.getCSS('--grid-strong');
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let y = startY; y <= endY; y += CELL) {
-        const yy = Math.round(y - camY) + 0.5;
-        ctx.moveTo(0, yy);
-        ctx.lineTo(w, yy);
-      }
-      ctx.stroke();
-      ctx.restore();
-      return;
-    }
-
-    if (this.storage.gridType === 'dots') {
-      // все точки — один путь и один fill вместо fill на каждую точку
-      ctx.fillStyle = this.getCSS('--grid-strong');
-      ctx.beginPath();
-      for (let y = startY; y <= endY; y += CELL) {
-        const yy = y - camY;
-        for (let x = 0; x <= w; x += CELL) {
-          ctx.moveTo(x + 1.15, yy);
-          ctx.arc(x, yy, 1.15, 0, Math.PI * 2);
-        }
-      }
-      ctx.fill();
-    } else { // grid — вертикали и горизонтали одним путём, один stroke
-      ctx.strokeStyle = this.getCSS('--grid');
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = 0; x <= w; x += CELL) {
-        const xx = Math.round(x) + 0.5;
-        ctx.moveTo(xx, 0);
-        ctx.lineTo(xx, Math.max(0, vBottom));
-      }
-      for (let y = startY; y <= endY; y += CELL) {
-        const yy = Math.round(y - camY) + 0.5;
-        ctx.moveTo(0, yy);
-        ctx.lineTo(w, yy);
-      }
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
   drawStrokeTo(ctx, s, camY) {
     const pts = s.points;
     if (!pts.length) return;
@@ -490,7 +435,6 @@ export class CanvasRenderer {
     ctx.clearRect(0, 0, this.back.width, this.back.height);
     ctx.restore();
 
-    this.drawGrid(ctx, camY, this.worldW, this.worldH, PAGE_H);
     for (const im of this.storage.images) {
       if (im.page !== cur) continue;                                          // только текущая страница
       if (!im.img.complete || !im.img.naturalWidth) continue;

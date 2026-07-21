@@ -499,11 +499,6 @@ export class NetworkManager {
         this.storage.extendBottom(img);
         break;
       }
-      case 'changeGrid': {
-        this.storage.gridType = msg.payload.grid;
-        window.dispatchEvent(new CustomEvent('gridChanged'));
-        break;
-      }
       case 'addPage': {
         this.storage.insertPageAfter(msg.payload.afterId, msg.payload.pageId);
         window.dispatchEvent(new CustomEvent('pagesChanged'));

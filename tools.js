@@ -1,5 +1,4 @@
 import {
-  CELL,
   BOARD_W,
   PAGE_H,
   DEFAULT_PEN,
@@ -94,35 +93,11 @@ export class ToolManager {
       this.syncTools();
     });
 
-    const gridBtn = document.getElementById('gridBtn');
-    const gridMenu = document.getElementById('gridMenu');
-    gridBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const open = !gridMenu.classList.contains('open');
-      gridMenu.classList.toggle('open', open);
-      gridBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      if (open) this.positionGridMenu();
-    });
-    document.querySelectorAll('#gridMenu .btn').forEach(b => {
-      b.addEventListener('click', () => {
-        this.setGrid(b.dataset.grid);
-        gridMenu.classList.remove('open');
-        gridBtn.setAttribute('aria-expanded', 'false');
-      });
-    });
-    document.addEventListener('pointerdown', (e) => {
-      if (!gridMenu.contains(e.target) && e.target !== gridBtn) {
-        gridMenu.classList.remove('open');
-        gridBtn.setAttribute('aria-expanded', 'false');
-      }
-    });
-
     document.getElementById('undoBtn').addEventListener('click', () => this.history.undo());
     document.getElementById('redoBtn').addEventListener('click', () => this.history.redo());
     document.getElementById('clearBtn').addEventListener('click', () => this.clearBoard());
     document.getElementById('imgBtn').addEventListener('click', () => this.fileInput.click());
-    document.getElementById('exportBtn').addEventListener('click', () => this.exportPNG());
-    window.addEventListener('gridChanged', () => this.syncTools());
+    document.getElementById('exportBtn').addEventListener('click', () => this.exportPDF());
 
     // Панель страниц (блокнот)
     document.getElementById('prevPageBtn')?.addEventListener('click', () => this.prevPage());
@@ -298,35 +273,10 @@ export class ToolManager {
       b.classList.toggle('sel', selected);
       b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
-    document.querySelectorAll('#gridMenu .btn').forEach(b => {
-      const selected = b.dataset.grid === this.storage.gridType;
-      b.classList.toggle('on', selected);
-      b.setAttribute('aria-pressed', selected ? 'true' : 'false');
-    });
-    const currentGrid = document.querySelector(`#gridMenu .btn[data-grid="${this.storage.gridType}"]`);
-    const gridBtn = document.getElementById('gridBtn');
-    if (gridBtn && currentGrid) gridBtn.title = `Настройки фона: ${currentGrid.title}`;
     if (this.storage.tool !== 'eraser') this.hideEraserCursor();
     this.stage.classList.toggle('lasso', this.storage.tool === 'lasso');
     // Выделение изображения больше не привязано к инструменту «выделение»:
     // им можно управлять в любом инструменте, поэтому здесь его не сбрасываем.
-  }
-
-  positionGridMenu() {
-    const btn = document.getElementById('gridBtn');
-    const menu = document.getElementById('gridMenu');
-    if (!btn || !menu) return;
-    const r = btn.getBoundingClientRect();
-    const menuW = menu.offsetWidth || 146;
-    menu.style.left = `${Math.max(8, Math.min(innerWidth - menuW - 8, r.right - menuW))}px`;
-    menu.style.top = `${Math.min(innerHeight - 48, r.bottom + 8)}px`;
-  }
-
-  setGrid(grid) {
-    this.storage.gridType = grid;
-    this.syncTools();
-    this.renderer.renderBack();
-    this.network.send({ type: 'changeGrid', payload: { grid } });
   }
 
   attachLongPress(el, cb) {
@@ -1303,8 +1253,7 @@ export class ToolManager {
   initPressFx() {
     const bars = [
       document.querySelector('.toolbar'),
-      document.getElementById('pagebar'),
-      document.getElementById('gridMenu')
+      document.getElementById('pagebar')
     ].filter(Boolean);
     const onPress = (e) => {
       const btn = e.target.closest('.btn, .swatch, .size, .presence');
@@ -1349,20 +1298,46 @@ export class ToolManager {
     el.style.transition = '';
   }
 
-  // --- Export PNG (текущая страница) ---
+  // --- Экспорт всех страниц в один PDF ---
 
-  exportPNG() {
+  exportPDF() {
+    try {
+      const pages = this.storage.pages;
+      if (!pages || !pages.length) return;
+
+      const imgs = [];
+      for (const pageId of pages) {
+        const { canvas, w, h } = this.renderPageCanvas(pageId);
+        const jpeg = this.dataURLToBytes(canvas.toDataURL('image/jpeg', 0.92));
+        imgs.push({ jpeg, w, h });
+      }
+
+      const bytes = this.buildPDF(imgs);
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `whiteboard-${this.storage.boardId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      this.network.showToast('Не удалось создать PDF');
+    }
+  }
+
+  // Рендер одной страницы на offscreen-canvas: белый фон + изображения, поверх —
+  // штрихи на прозрачном слое (чтобы ластик стирал только чернила, как в живом виде).
+  renderPageCanvas(pageId) {
     const margin = 40;
-    const cur = this.storage.currentPageId;
-    const fullW = BOARD_W;                                    // единая ширина холста
-    const viewWorldH = this.renderer.H / this.renderer.scale; // видимая высота (мир)
-    const pageBottom = this.storage.pageContentBottom(cur);
-    // Экспортируем текущую страницу: по содержимому, но не выше PAGE_H.
-    const fullH = Math.min(PAGE_H, Math.max(Math.round(viewWorldH), Math.ceil(pageBottom) + margin));
+    const fullW = BOARD_W;                                      // единая ширина холста
+    const minH = Math.round(BOARD_W * 1.414);                  // ~A4 для пустых/коротких страниц
+    const pageBottom = this.storage.pageContentBottom(pageId);
+    // По содержимому страницы, но не ниже минимума и не выше PAGE_H.
+    const fullH = Math.min(PAGE_H, Math.max(minH, Math.ceil(pageBottom) + margin));
     const scale = Math.min(1, MAX_EXPORT_H / fullH);
     const outW = Math.round(fullW * scale), outH = Math.round(fullH * scale);
 
-    // bg + grid + images
     const bg = document.createElement('canvas');
     bg.width = outW;
     bg.height = outH;
@@ -1370,37 +1345,95 @@ export class ToolManager {
     bx.scale(scale, scale);
     bx.fillStyle = '#ffffff';
     bx.fillRect(0, 0, fullW, fullH);
-
-    this.renderer.drawGrid(bx, 0, fullW, fullH, PAGE_H);
     for (const im of this.storage.images) {
-      if (im.page !== cur) continue;
+      if (im.page !== pageId) continue;
       if (im.img.complete && im.img.naturalWidth) {
         bx.drawImage(im.img, im.x, im.y, im.w, im.h);
       }
     }
 
-    // strokes on a transparent canvas
+    // штрихи на прозрачном слое, затем композитинг поверх фона
     const il = document.createElement('canvas');
     il.width = outW;
     il.height = outH;
     const ix = il.getContext('2d');
     ix.scale(scale, scale);
     for (const s of this.storage.strokes) {
-      if (s.page === cur) this.renderer.drawStrokeTo(ix, s, 0);
+      if (s.page === pageId) this.renderer.drawStrokeTo(ix, s, 0);
     }
-
     bx.drawImage(il, 0, 0, fullW, fullH);
 
-    const pageNo = this.storage.currentPageIndex() + 1;
-    bg.toBlob(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `whiteboard-${this.storage.boardId}-p${pageNo}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }, 'image/png');
+    return { canvas: bg, w: outW, h: outH };
+  }
+
+  dataURLToBytes(dataUrl) {
+    const bin = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  // Минимальный PDF-писатель без внешних зависимостей: каждая страница холста —
+  // отдельная страница PDF с JPEG-изображением (DCTDecode) во всю страницу.
+  // 1 px = 1 pt. Смещения объектов считаем в байтах (JPEG — бинарный поток).
+  buildPDF(imgs) {
+    const enc = new TextEncoder();
+    const chunks = [];
+    let length = 0;
+    const offsets = [];
+    const push = (data) => {
+      const b = typeof data === 'string' ? enc.encode(data) : data;
+      chunks.push(b);
+      length += b.length;
+    };
+    const startObj = (num) => { offsets[num] = length; };
+
+    const n = imgs.length;
+    const objCount = 2 + n * 3;                                 // catalog + pages + (page,content,image)×N
+
+    push('%PDF-1.4\n');
+    push(new Uint8Array([0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A])); // бинарный маркер
+
+    startObj(1);
+    push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+
+    let kids = '';
+    for (let i = 0; i < n; i++) kids += `${3 + i * 3} 0 R `;
+    startObj(2);
+    push(`2 0 obj\n<< /Type /Pages /Kids [ ${kids.trim()} ] /Count ${n} >>\nendobj\n`);
+
+    for (let i = 0; i < n; i++) {
+      const pageObj = 3 + i * 3, contentObj = pageObj + 1, imgObj = pageObj + 2;
+      const { jpeg, w, h } = imgs[i];
+
+      startObj(pageObj);
+      push(`${pageObj} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] `
+        + `/Resources << /XObject << /Im0 ${imgObj} 0 R >> >> /Contents ${contentObj} 0 R >>\nendobj\n`);
+
+      const stream = `q\n${w} 0 0 ${h} 0 0 cm\n/Im0 Do\nQ\n`;
+      startObj(contentObj);
+      push(`${contentObj} 0 obj\n<< /Length ${enc.encode(stream).length} >>\nstream\n`);
+      push(stream);
+      push('endstream\nendobj\n');
+
+      startObj(imgObj);
+      push(`${imgObj} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} `
+        + `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
+      push(jpeg);
+      push('\nendstream\nendobj\n');
+    }
+
+    const xrefAt = length;
+    let xref = `xref\n0 ${objCount + 1}\n0000000000 65535 f \n`;
+    for (let num = 1; num <= objCount; num++) {
+      xref += String(offsets[num]).padStart(10, '0') + ' 00000 n \n';
+    }
+    push(xref);
+    push(`trailer\n<< /Size ${objCount + 1} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
+
+    const out = new Uint8Array(length);
+    let p = 0;
+    for (const b of chunks) { out.set(b, p); p += b.length; }
+    return out;
   }
 }

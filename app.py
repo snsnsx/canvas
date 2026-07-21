@@ -37,7 +37,6 @@ class BoardState:
     def __init__(self, board_id: str):
         self.board_id = board_id
         self.v = 1
-        self.grid = "none"
         self.pages = [DEFAULT_PAGE_ID]   # упорядоченный список id страниц
         self.contentBottom = 0.0
         self.penColors = ["#1f1f42", "#dc2626", "#14992f"]
@@ -47,7 +46,6 @@ class BoardState:
 
     def load_from_dict(self, data: dict):
         self.v = data.get("v", 1)
-        self.grid = data.get("grid", "grid")
         self.contentBottom = float(data.get("contentBottom", 0.0))
         self.penColors = data.get("penColors", ["#1f1f42", "#dc2626", "#14992f"])
         self.hlColors = data.get("hlColors", ["#fde047", "#7f46a4"])
@@ -124,7 +122,6 @@ class BoardState:
                 })
         return {
             "v": self.v,
-            "grid": self.grid,
             "pages": self.pages,
             "contentBottom": self.contentBottom,
             "penColors": self.penColors,
@@ -258,8 +255,6 @@ class BoardState:
                     if obj.get("page", DEFAULT_PAGE_ID) != page_id
                 }
                 self.recompute_content_bottom()
-        elif op_type == "changeGrid":
-            self.grid = payload["grid"]
         elif op_type == "clearBoard":
             self.objects.clear()
             self.contentBottom = 0.0

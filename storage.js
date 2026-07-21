@@ -1,7 +1,6 @@
 export const BOARD_W = 1024;                  // единая ширина холста (мировые px) для всех участников
 export const PAGE_H = 8000;                   // максимальная высота одной страницы (мировые px)
 export const DEFAULT_PAGE_ID = 'page-1';      // id первой/легаси-страницы (одинаков у всех клиентов)
-export const CELL = 32;                       // шаг сетки (мировые px)
 export const HL_ALPHA = 0.32;                 // прозрачность маркера
 export const DEFAULT_PEN = ['#1d1d1d','#e03131','#2f9e44'];   // 3 быстрых цвета ручки
 export const DEFAULT_HL  = ['#fde047','#7f46a4'];             // 2 цвета маркера
@@ -31,7 +30,6 @@ export class BoardStorage {
     this.penIdx = 0;
     this.hlIdx = 0;            // выбранный быстрый цвет
     this.sizeIdx = Object.assign({}, SIZE_DEFAULT);
-    this.gridType = 'none';                 // none | grid | dots | lines
 
     // Блокнот: упорядоченный список страниц. У каждого объекта есть поле page
     // (id страницы). Одновременно отображается только currentPageId.
@@ -59,7 +57,6 @@ export class BoardStorage {
   serialize() {
     return JSON.stringify({
       v: 1,
-      grid: this.gridType,
       pages: this.pages.slice(),
       contentBottom: this.contentBottom,
       penColors: this.penColors,
@@ -95,7 +92,6 @@ export class BoardStorage {
 
     if (Array.isArray(o.penColors) && o.penColors.length) this.penColors = o.penColors.slice(0,3);
     if (Array.isArray(o.hlColors) && o.hlColors.length) this.hlColors = o.hlColors.slice(0,2);
-    if (o.grid) this.gridType = o.grid;
 
     // Список страниц. Легаси-доски (без pages) сводятся к одной странице page-1.
     const pages = (Array.isArray(o.pages) ? o.pages : [])
