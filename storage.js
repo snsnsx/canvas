@@ -1,4 +1,6 @@
 export const BOARD_W = 1024;                  // единая ширина холста (мировые px) для всех участников
+export const PAGE_H = 8000;                   // максимальная высота одной страницы (мировые px)
+export const DEFAULT_PAGE_ID = 'page-1';      // id первой/легаси-страницы (одинаков у всех клиентов)
 export const CELL = 32;                       // шаг сетки (мировые px)
 export const HL_ALPHA = 0.32;                 // прозрачность маркера
 export const DEFAULT_PEN = ['#1d1d1d','#e03131','#2f9e44'];   // 3 быстрых цвета ручки
@@ -31,8 +33,13 @@ export class BoardStorage {
     this.sizeIdx = Object.assign({}, SIZE_DEFAULT);
     this.gridType = 'none';                 // none | grid | dots | lines
 
-    this.strokes = [];                      // [{id, tool, color, size, points:[{x,y}], minY, maxY}]
-    this.images  = [];                      // [{id, src, img, x, y, w, h}]
+    // Блокнот: упорядоченный список страниц. У каждого объекта есть поле page
+    // (id страницы). Одновременно отображается только currentPageId.
+    this.pages = [DEFAULT_PAGE_ID];         // порядок страниц (общий для всех клиентов)
+    this.currentPageId = DEFAULT_PAGE_ID;   // текущая видимая страница (локально у каждого)
+
+    this.strokes = [];                      // [{id, page, tool, color, size, points:[{x,y}], minY, maxY}]
+    this.images  = [];                      // [{id, page, src, img, x, y, w, h}]
     this.contentBottom = 0;                 // нижняя граница содержимого (мир)
     this.cameraY = 0;                       // смещение «камеры» вниз (мир)
     this.selected = null;                   // выбранное изображение
@@ -53,11 +60,13 @@ export class BoardStorage {
     return JSON.stringify({
       v: 1,
       grid: this.gridType,
+      pages: this.pages.slice(),
       contentBottom: this.contentBottom,
       penColors: this.penColors,
       hlColors: this.hlColors,
       strokes: this.strokes.map(s => ({
         id: s.id || generateUUID(),
+        page: s.page || DEFAULT_PAGE_ID,
         tool: s.tool,
         color: s.color,
         size: s.size,
@@ -65,6 +74,7 @@ export class BoardStorage {
       })),
       images: this.images.map(im => ({
         id: im.id || generateUUID(),
+        page: im.page || DEFAULT_PAGE_ID,
         x: im.x,
         y: im.y,
         w: im.w,
@@ -87,14 +97,24 @@ export class BoardStorage {
     if (Array.isArray(o.hlColors) && o.hlColors.length) this.hlColors = o.hlColors.slice(0,2);
     if (o.grid) this.gridType = o.grid;
 
+    // Список страниц. Легаси-доски (без pages) сводятся к одной странице page-1.
+    const pages = (Array.isArray(o.pages) ? o.pages : [])
+      .filter(id => typeof id === 'string' && id)
+      .slice(0, 500);
+    this.pages = pages.length ? pages.slice() : [DEFAULT_PAGE_ID];
+    // Сохраняем текущую страницу при переподключении; если её больше нет — на первую.
+    if (!this.pages.includes(this.currentPageId)) this.currentPageId = this.pages[0];
+
     this.strokes = (o.strokes || []).map(s => {
       const st = {
         id: s.id || generateUUID(),
+        page: s.page || DEFAULT_PAGE_ID,
         tool: s.tool,
         color: s.color,
         size: s.size,
         points: s.points || []
       };
+      this.ensurePage(st.page);
       this.computeBBox(st);
       return st;
     });
@@ -102,6 +122,7 @@ export class BoardStorage {
     this.images = (o.images || []).map(d => {
       const im = {
         id: d.id || generateUUID(),
+        page: d.page || DEFAULT_PAGE_ID,
         src: d.src,
         x: d.x,
         y: d.y,
@@ -109,6 +130,7 @@ export class BoardStorage {
         h: d.h,
         img: new Image()
       };
+      this.ensurePage(im.page);
       im.img.onload = () => {
         if (window.dispatchEvent) {
           window.dispatchEvent(new CustomEvent('imageLoaded'));
@@ -121,7 +143,61 @@ export class BoardStorage {
     this.selected = null;
     this.selection = null;
     this.recomputeContentBottom();
+    if (window.dispatchEvent) window.dispatchEvent(new CustomEvent('pagesChanged'));
     return true;
+  }
+
+  // --- Страницы (блокнот) ---
+
+  pageIndex(id) {
+    return this.pages.indexOf(id);
+  }
+
+  currentPageIndex() {
+    const i = this.pages.indexOf(this.currentPageId);
+    return i < 0 ? 0 : i;
+  }
+
+  // Гарантирует, что страница присутствует в списке (для объектов, пришедших
+  // от удалённого клиента раньше, чем сообщение addPage).
+  ensurePage(id) {
+    if (id && !this.pages.includes(id)) this.pages.push(id);
+  }
+
+  // Вставляет новую страницу после afterId (или в конец). Идемпотентно.
+  insertPageAfter(afterId, newId) {
+    if (!newId || this.pages.includes(newId)) return;
+    const at = this.pages.indexOf(afterId);
+    if (at < 0) this.pages.push(newId);
+    else this.pages.splice(at + 1, 0, newId);
+  }
+
+  // Удаляет страницу и все её объекты. Возвращает удалённые объекты (для истории).
+  removePage(id) {
+    const at = this.pages.indexOf(id);
+    if (at < 0 || this.pages.length <= 1) return null;
+    const strokes = this.strokes.filter(s => s.page === id);
+    const images = this.images.filter(im => im.page === id);
+    this.strokes = this.strokes.filter(s => s.page !== id);
+    this.images = this.images.filter(im => im.page !== id);
+    this.pages.splice(at, 1);
+    if (this.currentPageId === id) {
+      this.currentPageId = this.pages[Math.min(at, this.pages.length - 1)];
+    }
+    this.recomputeContentBottom();
+    return { index: at, strokes, images };
+  }
+
+  // Нижняя граница содержимого конкретной страницы (для экспорта).
+  pageContentBottom(id) {
+    let m = 0;
+    for (const s of this.strokes) {
+      if (s.page === id && s.maxY > m) m = s.maxY;
+    }
+    for (const im of this.images) {
+      if (im.page === id && im.y + im.h > m) m = im.y + im.h;
+    }
+    return m;
   }
 
   extendBottom(s) {

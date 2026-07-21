@@ -12,6 +12,9 @@
 <link rel="alternate icon" href="/favicon.ico">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#ffffff">
+<!-- GSAP (локально) — плавные переходы между страницами. Классический скрипт
+     грузится до отложенного модуля, поэтому window.gsap доступен в tools.js. -->
+<script src="/gsap.min.js"></script>
 <style>
   :root {
     color-scheme: light;
@@ -470,6 +473,62 @@
     border: 0;
   }
 
+  /* Панель страниц (блокнот) — слева, в стиле основного toolbar. */
+  .pagebar {
+    position: fixed;
+    z-index: 20;
+    top: max(18px, env(safe-area-inset-top));
+    left: max(12px, env(safe-area-inset-left));
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+
+  .page-indicator {
+    min-width: 44px;
+    min-height: var(--control);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: rgba(21, 21, 21, 0.045);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .page-indicator.pulse {
+    animation: page-pulse 0.45s ease;
+  }
+
+  @keyframes page-pulse {
+    from { transform: scale(1.34); }
+    to { transform: scale(1); }
+  }
+
+  /* Фолбэк пружинного «попа» при нажатии, если GSAP не загрузился. */
+  .tap-pop {
+    animation: tap-pop-kf 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes tap-pop-kf {
+    from { transform: scale(0.8); }
+    to { transform: scale(1); }
+  }
+
   @media (max-width: 760px) {
     :root {
       --control: 31px;
@@ -497,6 +556,16 @@
     .vbar {
       top: calc(max(8px, env(safe-area-inset-top)) + 62px);
       right: max(8px, env(safe-area-inset-right));
+    }
+
+    /* На узких экранах уводим панель страниц вниз-влево, чтобы не пересекаться
+       с основным toolbar сверху. */
+    .pagebar {
+      top: auto;
+      left: max(8px, env(safe-area-inset-left));
+      bottom: max(8px, env(safe-area-inset-bottom));
+      padding: 5px;
+      gap: 3px;
     }
   }
 </style>
@@ -636,7 +705,7 @@
           <path d="M16.8 11.1h-5.3" stroke="rgba(255,255,255,.7)" stroke-width="1.15" stroke-linecap="round"/>
         </svg>
       </button>
-      <button id="clearBtn" class="btn icon danger" type="button" aria-label="Очистить доску" title="Очистить доску">
+      <button id="clearBtn" class="btn icon danger" type="button" aria-label="Очистить страницу" title="Очистить страницу">
         <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <defs>
             <linearGradient id="i-clear-bin" x1="7" y1="5" x2="17" y2="20" gradientUnits="userSpaceOnUse">
@@ -661,6 +730,45 @@
       </button>
     </div>
   </header>
+
+  <nav id="pagebar" class="pagebar" aria-label="Страницы">
+    <div class="group" aria-label="Навигация по страницам">
+      <button id="prevPageBtn" class="btn icon" type="button" aria-label="Предыдущая страница" title="Предыдущая страница ([)">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs><linearGradient id="i-page-prev" x1="6" y1="6" x2="15" y2="18" gradientUnits="userSpaceOnUse"><stop stop-color="#A8C7FA"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
+          <path d="M14.5 5.8 8.6 12l5.9 6.2" fill="none" stroke="url(#i-page-prev)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <span id="pageIndicator" class="page-indicator" aria-live="polite" title="Текущая страница / всего">1/1</span>
+      <button id="nextPageBtn" class="btn icon" type="button" aria-label="Следующая страница" title="Следующая страница (])">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs><linearGradient id="i-page-next" x1="18" y1="6" x2="9" y2="18" gradientUnits="userSpaceOnUse"><stop stop-color="#A8C7FA"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
+          <path d="M9.5 5.8 15.4 12l-5.9 6.2" fill="none" stroke="url(#i-page-next)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="group" aria-label="Управление страницами">
+      <button id="addPageBtn" class="btn icon" type="button" aria-label="Добавить страницу" title="Добавить страницу">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs><linearGradient id="i-page-add" x1="6" y1="3" x2="18" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#EAF2FF"/><stop offset="1" stop-color="#A8C7FA"/></linearGradient></defs>
+          <path d="M7.4 3.5h5.6L17.6 8v11.5a1 1 0 0 1-1 1H7.4a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="url(#i-page-add)" class="m-edge"/>
+          <path d="M13 3.7V7.4a1 1 0 0 0 1 1h3.5" fill="none" stroke="#4A6DA6" stroke-width="1.15" stroke-linecap="round"/>
+          <circle cx="16.4" cy="16.4" r="4.7" fill="#10A37F" class="m-edge"/>
+          <path d="M16.4 14.1v4.6M14.1 16.4h4.6" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="delPageBtn" class="btn icon" type="button" aria-label="Удалить страницу" title="Удалить страницу">
+        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs><linearGradient id="i-page-del" x1="6" y1="3" x2="18" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#FFF1F0"/><stop offset="1" stop-color="#FFCDCB"/></linearGradient></defs>
+          <path d="M7.4 3.5h5.6L17.6 8v11.5a1 1 0 0 1-1 1H7.4a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="url(#i-page-del)" class="m-edge"/>
+          <path d="M13 3.7V7.4a1 1 0 0 0 1 1h3.5" fill="none" stroke="#C0687F" stroke-width="1.15" stroke-linecap="round"/>
+          <circle cx="16.4" cy="16.4" r="4.7" fill="#BA1A1A" class="m-edge"/>
+          <path d="M14.1 16.4h4.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </nav>
 
   <div id="gridMenu" class="grid-menu" role="menu" aria-label="Фон доски">
     <button class="btn icon" type="button" data-grid="none" role="menuitem" aria-label="Без сетки" title="Без сетки"><svg class="m-icon" viewBox="0 0 24 24"><rect x="5" y="4.5" width="14" height="15" rx="4" fill="#eefaf6" class="m-edge"/><circle cx="12" cy="12" r="2" fill="#10A37F"/></svg></button>

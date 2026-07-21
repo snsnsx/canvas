@@ -1,4 +1,8 @@
-import { CELL, HL_ALPHA, BOARD_W } from './storage.js';
+import { CELL, HL_ALPHA, BOARD_W, PAGE_H } from './storage.js';
+
+// Небольшой запас прокрутки ниже конца страницы, чтобы граница листа
+// (разделитель + фон приложения) была видна — лист ощущается ограниченным.
+const PAGE_END_GAP = 90;
 
 export class CanvasRenderer {
   constructor(storage) {
@@ -97,8 +101,10 @@ export class CanvasRenderer {
     this.fullRender();
   }
 
+  // Прокрутка ограничена высотой страницы (+ небольшой запас, чтобы был виден
+  // конец листа). Дальше низа страницы уходить нельзя.
   maxCamera() {
-    return Math.max(0, this.storage.contentBottom + this.worldH);
+    return Math.max(0, PAGE_H - this.worldH + PAGE_END_GAP);
   }
 
   clampCamera() {
@@ -262,18 +268,21 @@ export class CanvasRenderer {
     }
   }
 
-  drawGrid(ctx, camY, w, h) {
+  // maxWorldY ограничивает сетку по высоте страницы (в живом виде — PAGE_H).
+  drawGrid(ctx, camY, w, h, maxWorldY = Infinity) {
     if (this.storage.gridType === 'none') return;
     ctx.save();
 
     const startY = Math.floor(camY / CELL) * CELL;
+    const endY = Math.min(camY + h, maxWorldY);          // нижняя граница по миру
+    const vBottom = Math.min(h, maxWorldY - camY);        // низ вертикалей на экране
 
     if (this.storage.gridType === 'lines') {
       // линейка — горизонтальные линии, прокручиваются по Y (единый путь)
       ctx.strokeStyle = this.getCSS('--grid-strong');
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let y = startY; y <= camY + h; y += CELL) {
+      for (let y = startY; y <= endY; y += CELL) {
         const yy = Math.round(y - camY) + 0.5;
         ctx.moveTo(0, yy);
         ctx.lineTo(w, yy);
@@ -287,7 +296,7 @@ export class CanvasRenderer {
       // все точки — один путь и один fill вместо fill на каждую точку
       ctx.fillStyle = this.getCSS('--grid-strong');
       ctx.beginPath();
-      for (let y = startY; y <= camY + h; y += CELL) {
+      for (let y = startY; y <= endY; y += CELL) {
         const yy = y - camY;
         for (let x = 0; x <= w; x += CELL) {
           ctx.moveTo(x + 1.15, yy);
@@ -302,9 +311,9 @@ export class CanvasRenderer {
       for (let x = 0; x <= w; x += CELL) {
         const xx = Math.round(x) + 0.5;
         ctx.moveTo(xx, 0);
-        ctx.lineTo(xx, h);
+        ctx.lineTo(xx, Math.max(0, vBottom));
       }
-      for (let y = startY; y <= camY + h; y += CELL) {
+      for (let y = startY; y <= endY; y += CELL) {
         const yy = Math.round(y - camY) + 0.5;
         ctx.moveTo(0, yy);
         ctx.lineTo(w, yy);
@@ -474,21 +483,26 @@ export class CanvasRenderer {
 
   renderBack() {
     const ctx = this.backCtx;
+    const camY = this.storage.cameraY;
+    const cur = this.storage.currentPageId;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.back.width, this.back.height);
     ctx.restore();
 
-    this.drawGrid(ctx, this.storage.cameraY, this.worldW, this.worldH);
+    this.drawGrid(ctx, camY, this.worldW, this.worldH, PAGE_H);
     for (const im of this.storage.images) {
+      if (im.page !== cur) continue;                                          // только текущая страница
       if (!im.img.complete || !im.img.naturalWidth) continue;
-      if (im.y + im.h < this.storage.cameraY || im.y > this.storage.cameraY + this.worldH) continue; // culling
-      ctx.drawImage(im.img, im.x, im.y - this.storage.cameraY, im.w, im.h);
+      if (im.y + im.h < camY || im.y > camY + this.worldH) continue;          // culling
+      ctx.drawImage(im.img, im.x, im.y - camY, im.w, im.h);
     }
   }
 
   strokeVisible(s) {
-    return s.maxY >= this.storage.cameraY - 4 && s.minY <= this.storage.cameraY + this.worldH + 4;
+    return s.page === this.storage.currentPageId
+      && s.maxY >= this.storage.cameraY - 4
+      && s.minY <= this.storage.cameraY + this.worldH + 4;
   }
 
   rebuildInkCache() {

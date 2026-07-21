@@ -20,6 +20,7 @@ os.makedirs(BOARDS, exist_ok=True)
 # Имя доски: латиница/цифры/подчёркивание/дефис, до 64 символов.
 SAFE_ID = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 EPHEMERAL_WS_TYPES = {"cursorMove", "cursorLeave"}
+DEFAULT_PAGE_ID = "page-1"   # id первой/легаси-страницы (совпадает с фронтендом)
 
 app = FastAPI()
 
@@ -37,6 +38,7 @@ class BoardState:
         self.board_id = board_id
         self.v = 1
         self.grid = "none"
+        self.pages = [DEFAULT_PAGE_ID]   # упорядоченный список id страниц
         self.contentBottom = 0.0
         self.penColors = ["#1f1f42", "#dc2626", "#14992f"]
         self.hlColors = ["#fde047", "#7f46a4"]
@@ -51,6 +53,10 @@ class BoardState:
         self.hlColors = data.get("hlColors", ["#fde047", "#7f46a4"])
         self.version = int(data.get("version", self.version))
 
+        # Список страниц. Легаси-доски (без pages) сводятся к одной странице.
+        pages = [p for p in data.get("pages", []) if isinstance(p, str) and p]
+        self.pages = pages if pages else [DEFAULT_PAGE_ID]
+
         self.objects = {}
 
         # Load legacy strokes
@@ -63,11 +69,13 @@ class BoardState:
             self.objects[sid] = {
                 "id": sid,
                 "type": "stroke",
+                "page": s.get("page", DEFAULT_PAGE_ID),
                 "tool": s.get("tool", "pen"),
                 "color": s.get("color", "#000000"),
                 "size": float(s.get("size", 2)),
                 "points": [self._decode_point(p) for p in s.get("points", [])]
             }
+            self._ensure_page(self.objects[sid]["page"])
 
         # Load legacy images
         images = data.get("images", [])
@@ -79,12 +87,14 @@ class BoardState:
             self.objects[iid] = {
                 "id": iid,
                 "type": "image",
+                "page": im.get("page", DEFAULT_PAGE_ID),
                 "src": im.get("src", ""),
                 "x": float(im.get("x", 0)),
                 "y": float(im.get("y", 0)),
                 "w": float(im.get("w", 100)),
                 "h": float(im.get("h", 100))
             }
+            self._ensure_page(self.objects[iid]["page"])
 
         # Пересчёт по фактическим объектам: чинит старые доски и вертикальную границу.
         self.recompute_content_bottom()
@@ -96,6 +106,7 @@ class BoardState:
             if obj["type"] == "stroke":
                 strokes_list.append({
                     "id": obj["id"],
+                    "page": obj.get("page", DEFAULT_PAGE_ID),
                     "tool": obj["tool"],
                     "color": obj["color"],
                     "size": obj["size"],
@@ -104,6 +115,7 @@ class BoardState:
             elif obj["type"] == "image":
                 images_list.append({
                     "id": obj["id"],
+                    "page": obj.get("page", DEFAULT_PAGE_ID),
                     "src": obj["src"],
                     "x": obj["x"],
                     "y": obj["y"],
@@ -113,6 +125,7 @@ class BoardState:
         return {
             "v": self.v,
             "grid": self.grid,
+            "pages": self.pages,
             "contentBottom": self.contentBottom,
             "penColors": self.penColors,
             "hlColors": self.hlColors,
@@ -159,6 +172,11 @@ class BoardState:
         elif obj.get("type") == "image":
             self._bump_bottom(obj.get("y", 0.0) + obj.get("h", 0.0))
 
+    def _ensure_page(self, page_id: str):
+        # Страница объекта могла прийти раньше сообщения addPage — добавим её.
+        if page_id and page_id not in self.pages:
+            self.pages.append(page_id)
+
     def apply_operation(self, op_type: str, payload: dict):
         # contentBottom обновляется по месту: операции роста только двигают границу
         # вниз, а полный пересчёт нужен лишь там, где содержимое может уменьшиться.
@@ -167,11 +185,13 @@ class BoardState:
             obj = {
                 "id": sid,
                 "type": "stroke",
+                "page": payload.get("page", DEFAULT_PAGE_ID),
                 "tool": payload["tool"],
                 "color": payload["color"],
                 "size": float(payload["size"]),
                 "points": [self._decode_point(p) for p in payload.get("points", [])]
             }
+            self._ensure_page(obj["page"])
             self.objects[sid] = obj
             self._bump_object(obj)
         elif op_type == "appendPoints":
@@ -191,6 +211,9 @@ class BoardState:
         elif op_type == "restoreObject":
             oid = payload["objectId"]
             data = payload["data"]
+            if "page" not in data:
+                data["page"] = DEFAULT_PAGE_ID
+            self._ensure_page(data["page"])
             self.objects[oid] = data
             self._bump_object(data)
         elif op_type == "moveObject":
@@ -208,14 +231,33 @@ class BoardState:
             obj = {
                 "id": iid,
                 "type": "image",
+                "page": payload.get("page", DEFAULT_PAGE_ID),
                 "src": payload["src"],
                 "x": float(payload["x"]),
                 "y": float(payload["y"]),
                 "w": float(payload["w"]),
                 "h": float(payload["h"])
             }
+            self._ensure_page(obj["page"])
             self.objects[iid] = obj
             self._bump_object(obj)
+        elif op_type == "addPage":
+            page_id = payload.get("pageId")
+            after_id = payload.get("afterId")
+            if page_id and page_id not in self.pages:
+                if after_id in self.pages:
+                    self.pages.insert(self.pages.index(after_id) + 1, page_id)
+                else:
+                    self.pages.append(page_id)
+        elif op_type == "deletePage":
+            page_id = payload.get("pageId")
+            if page_id in self.pages and len(self.pages) > 1:
+                self.pages.remove(page_id)
+                self.objects = {
+                    oid: obj for oid, obj in self.objects.items()
+                    if obj.get("page", DEFAULT_PAGE_ID) != page_id
+                }
+                self.recompute_content_bottom()
         elif op_type == "changeGrid":
             self.grid = payload["grid"]
         elif op_type == "clearBoard":
@@ -345,29 +387,41 @@ board_manager = BoardManager()
 
 # --- HTTP Static / Main Routes ---
 
+# index.html и модули приложения отдаём с no-cache: браузер каждый раз проверяет
+# ETag/mtime и подхватывает свежую версию после правок (без ручного сброса кэша).
+# Без этого заголовка HTML попадает в эвристический кэш браузера и на одном origin
+# (например, 127.0.0.1) может залипнуть старая разметка, тогда как на другом
+# (localhost) уже свежая — из-за чего «новые» элементы там перестают работать.
+NO_CACHE = {"Cache-Control": "no-cache"}
+JS_HEADERS = NO_CACHE
+
 @app.get("/")
 async def index():
-    return FileResponse(INDEX)
+    return FileResponse(INDEX, headers=NO_CACHE)
 
 @app.get("/storage.js")
 async def get_storage():
-    return FileResponse(os.path.join(BASE, "storage.js"), media_type="application/javascript")
+    return FileResponse(os.path.join(BASE, "storage.js"), media_type="application/javascript", headers=JS_HEADERS)
 
 @app.get("/history.js")
 async def get_history():
-    return FileResponse(os.path.join(BASE, "history.js"), media_type="application/javascript")
+    return FileResponse(os.path.join(BASE, "history.js"), media_type="application/javascript", headers=JS_HEADERS)
 
 @app.get("/canvas.js")
 async def get_canvas():
-    return FileResponse(os.path.join(BASE, "canvas.js"), media_type="application/javascript")
+    return FileResponse(os.path.join(BASE, "canvas.js"), media_type="application/javascript", headers=JS_HEADERS)
 
 @app.get("/network.js")
 async def get_network():
-    return FileResponse(os.path.join(BASE, "network.js"), media_type="application/javascript")
+    return FileResponse(os.path.join(BASE, "network.js"), media_type="application/javascript", headers=JS_HEADERS)
 
 @app.get("/tools.js")
 async def get_tools():
-    return FileResponse(os.path.join(BASE, "tools.js"), media_type="application/javascript")
+    return FileResponse(os.path.join(BASE, "tools.js"), media_type="application/javascript", headers=JS_HEADERS)
+
+@app.get("/gsap.min.js")
+async def get_gsap():
+    return FileResponse(os.path.join(BASE, "gsap.min.js"), media_type="application/javascript")
 
 # --- Иконки (favicon) ---
 # Отдаём только разрешённые файлы из корня проекта.

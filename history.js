@@ -275,8 +275,8 @@ export class HistoryManager {
 
   sendRestore(object, objectType) {
     const data = objectType === 'stroke'
-      ? { id: object.id, type: 'stroke', tool: object.tool, color: object.color, size: object.size, points: object.points }
-      : { id: object.id, type: 'image', src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
+      ? { id: object.id, type: 'stroke', page: object.page, tool: object.tool, color: object.color, size: object.size, points: object.points }
+      : { id: object.id, type: 'image', page: object.page, src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
     this.network.send({ type: 'restoreObject', payload: { objectId: object.id, data } });
   }
 }

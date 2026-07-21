@@ -1,6 +1,7 @@
 import {
   CELL,
   BOARD_W,
+  PAGE_H,
   DEFAULT_PEN,
   DEFAULT_HL,
   SIZE_PRESETS,
@@ -45,6 +46,9 @@ export class ToolManager {
     this.thumb = document.getElementById('thumb');
     this.stage = this.renderer.stage;
     this.eraserCursor = document.getElementById('eraserCursor');
+
+    // Панель страниц (слева)
+    this.pageIndicator = document.getElementById('pageIndicator');
 
     this.init();
   }
@@ -120,6 +124,15 @@ export class ToolManager {
     document.getElementById('exportBtn').addEventListener('click', () => this.exportPNG());
     window.addEventListener('gridChanged', () => this.syncTools());
 
+    // Панель страниц (блокнот)
+    document.getElementById('prevPageBtn')?.addEventListener('click', () => this.prevPage());
+    document.getElementById('nextPageBtn')?.addEventListener('click', () => this.nextPage());
+    document.getElementById('addPageBtn')?.addEventListener('click', () => this.addPage());
+    document.getElementById('delPageBtn')?.addEventListener('click', () => this.deleteCurrentPage());
+    // Обновление индикатора при изменениях страниц от удалённых клиентов / загрузки.
+    window.addEventListener('pagesChanged', () => this.updatePageUI());
+    this.updatePageUI();
+
     // Image Upload
     this.fileInput.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
@@ -176,6 +189,9 @@ export class ToolManager {
     // Ладонь, лежащая на планшете во время письма пером, не должна запускать
     // нативное выделение содержимого страницы (страховка к user-select: none).
     this.stage.addEventListener('selectstart', e => e.preventDefault());
+
+    // Пружинистый отклик на нажатие во всех тулбарах.
+    this.initPressFx();
   }
 
   // --- Swatches & Size UI Builders ---
@@ -427,6 +443,12 @@ export class ToolManager {
         this.renderer.clampCamera();
         this.renderer.scheduleRender();
         break;
+      case '[':
+        this.prevPage();
+        break;
+      case ']':
+        this.nextPage();
+        break;
     }
   }
 
@@ -560,6 +582,7 @@ export class ToolManager {
     };
     this.activeStroke = {
       id: strokeId,
+      page: this.storage.currentPageId,
       tool: this.storage.tool,
       color: col,
       size: sz,
@@ -570,7 +593,7 @@ export class ToolManager {
     this.renderer.activeStroke = this.activeStroke;
 
     // Buffer and stream points
-    this.network.startStroke(strokeId, this.storage.tool, col, sz, wpt);
+    this.network.startStroke(strokeId, this.storage.tool, col, sz, wpt, this.storage.currentPageId);
     this.renderer.renderActive(this.activeStroke);
   }
 
@@ -827,8 +850,9 @@ export class ToolManager {
     if (this.lassoMode === 'draw') {
       const path = this.renderer.lassoPath || [];
       if (path.length >= 3) {
-        const strokes = this.storage.strokes.filter(s => (s.points || []).some(p => this.pointInPolygon(p, path)));
-        const images = this.storage.images.filter(im => this.pointInPolygon({ x: im.x + im.w / 2, y: im.y + im.h / 2 }, path));
+        const cur = this.storage.currentPageId;
+        const strokes = this.storage.strokes.filter(s => s.page === cur && (s.points || []).some(p => this.pointInPolygon(p, path)));
+        const images = this.storage.images.filter(im => im.page === cur && this.pointInPolygon({ x: im.x + im.w / 2, y: im.y + im.h / 2 }, path));
         this.storage.selection = (strokes.length || images.length) ? { strokes, images } : null;
       }
       this.renderer.lassoPath = null;
@@ -889,8 +913,8 @@ export class ToolManager {
 
   broadcastRestore(object, objectType) {
     const data = objectType === 'stroke'
-      ? { id: object.id, type: 'stroke', tool: object.tool, color: object.color, size: object.size, points: object.points }
-      : { id: object.id, type: 'image', src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
+      ? { id: object.id, type: 'stroke', page: object.page, tool: object.tool, color: object.color, size: object.size, points: object.points }
+      : { id: object.id, type: 'image', page: object.page, src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
     this.network.send({ type: 'restoreObject', payload: { objectId: object.id, data } });
   }
 
@@ -921,6 +945,7 @@ export class ToolManager {
   hitImage(wx, wy) {
     for (let i = this.storage.images.length - 1; i >= 0; i--) {
       const im = this.storage.images[i];
+      if (im.page !== this.storage.currentPageId) continue;
       if (wx >= im.x && wx <= im.x + im.w && wy >= im.y && wy <= im.y + im.h) return im;
     }
     return null;
@@ -1111,10 +1136,13 @@ export class ToolManager {
       // держим картинку в пределах ширины доски и не выше видимого верха
       x = Math.max(12, Math.min(x, BOARD_W - iw - 12));
       y = Math.max(this.storage.cameraY + 12, y);
+      // и в пределах высоты страницы (лист ограничен PAGE_H)
+      y = Math.min(y, Math.max(12, PAGE_H - ih - 12));
 
       const imageId = generateUUID();
       const im = {
         id: imageId,
+        page: this.storage.currentPageId,
         src,
         img,
         x: x,
@@ -1135,6 +1163,7 @@ export class ToolManager {
         type: 'addImage',
         payload: {
           imageId: imageId,
+          page: im.page,
           src: src,
           x: im.x,
           y: im.y,
@@ -1156,41 +1185,180 @@ export class ToolManager {
 
   // --- Clear Board ---
 
+  // Очистка текущей страницы (в блокноте «Очистить» относится к листу, а не
+  // ко всему документу). Реализована как пакетное удаление — обратимо через undo.
   clearBoard() {
-    if (!this.storage.strokes.length && !this.storage.images.length) return;
+    const cur = this.storage.currentPageId;
+    const strokes = this.storage.strokes.filter(s => s.page === cur);
+    const images = this.storage.images.filter(im => im.page === cur);
+    if (!strokes.length && !images.length) return;
 
-    // Save previous state to history
-    const prevStrokes = this.storage.strokes.slice();
-    const prevImages = this.storage.images.slice();
+    const items = [];
+    for (const s of strokes) {
+      items.push({ id: s.id, objectType: 'stroke', objectData: s });
+      this.network.send({ type: 'deleteObject', payload: { objectId: s.id } });
+    }
+    for (const im of images) {
+      items.push({ id: im.id, objectType: 'image', objectData: im });
+      this.network.send({ type: 'deleteObject', payload: { objectId: im.id } });
+    }
 
-    this.storage.strokes = [];
-    this.storage.images = [];
+    this.storage.strokes = this.storage.strokes.filter(s => s.page !== cur);
+    this.storage.images = this.storage.images.filter(im => im.page !== cur);
     this.storage.selected = null;
     this.storage.selection = null;
-    this.storage.contentBottom = 0;
-    this.storage.cameraY = 0;
+    this.storage.recomputeContentBottom();
     this.renderer.fullRender();
 
-    // Broadcast clear event
-    this.network.send({
-      type: 'clearBoard',
-      payload: {}
-    });
-
-    this.history.push({
-      type: 'clear',
-      strokes: prevStrokes,
-      images: prevImages
-    });
+    this.history.push({ type: 'batch_delete', items });
   }
 
-  // --- Export PNG (растёт в высоту) ---
+  // --- Страницы (блокнот) ---
+
+  updatePageUI() {
+    const total = this.storage.pages.length;
+    const idx = this.storage.currentPageIndex();
+    if (this.pageIndicator) this.pageIndicator.textContent = `${idx + 1}/${total}`;
+    const prev = document.getElementById('prevPageBtn');
+    const next = document.getElementById('nextPageBtn');
+    const del = document.getElementById('delPageBtn');
+    if (prev) prev.disabled = idx <= 0;
+    if (next) next.disabled = idx >= total - 1;
+    if (del) del.disabled = total <= 1;
+    const pagebar = document.getElementById('pagebar');
+    if (pagebar) pagebar.setAttribute('aria-label', `Страницы: ${idx + 1} из ${total}`);
+  }
+
+  // Сброс локального состояния при смене листа (общий для навигации/добавления/удаления).
+  enterPage(pageId) {
+    this.storage.currentPageId = pageId;
+    this.storage.cameraY = 0;
+    this.storage.selected = null;
+    this.storage.selection = null;
+    this.renderer.lassoPath = null;
+    this.renderer.remoteCursors.clear();
+    this.renderer.stopFocus();
+    this.stopMomentum();
+    this.network.pauseAutoFocus();
+    this.network.sendCursorLeave();
+    this.updatePageUI();
+    this.renderer.clampCamera();
+  }
+
+  goToPage(index, dir = 0) {
+    const pages = this.storage.pages;
+    if (index < 0 || index >= pages.length) return;
+    if (index === this.storage.currentPageIndex()) return;
+    this.enterPage(pages[index]);
+    this.animatePageSwitch(dir);
+  }
+
+  nextPage() { this.goToPage(this.storage.currentPageIndex() + 1, 1); }
+  prevPage() { this.goToPage(this.storage.currentPageIndex() - 1, -1); }
+
+  addPage() {
+    const afterId = this.storage.currentPageId;
+    const newId = generateUUID();
+    this.storage.insertPageAfter(afterId, newId);
+    this.network.send({ type: 'addPage', payload: { pageId: newId, afterId } });
+    this.enterPage(newId);
+    this.animatePageSwitch(1);
+    this.network.showToast(`Добавлена страница ${this.storage.currentPageIndex() + 1} из ${this.storage.pages.length}`);
+  }
+
+  deleteCurrentPage() {
+    if (this.storage.pages.length <= 1) {
+      this.network.showToast('Нельзя удалить единственную страницу');
+      return;
+    }
+    const id = this.storage.currentPageId;
+    const hasContent = this.storage.strokes.some(s => s.page === id)
+      || this.storage.images.some(im => im.page === id);
+    if (hasContent && !window.confirm('Удалить эту страницу вместе со всем её содержимым?')) return;
+
+    this.network.send({ type: 'deletePage', payload: { pageId: id } });
+    const removed = this.storage.removePage(id);   // сам выберет соседнюю страницу
+    if (!removed) return;
+    this.enterPage(this.storage.currentPageId);
+    this.animatePageSwitch(-1);
+    this.network.showToast(`Страница удалена · осталось ${this.storage.pages.length}`);
+  }
+
+  // Смена листа: содержимое переключается мгновенно (fullRender) — холст
+  // никогда не остаётся смещённым/полупрозрачным. Анимируем только индикатор
+  // (пружинный «поп» через GSAP) — это заметная и безопасная обратная связь.
+  animatePageSwitch(dir = 0) {
+    this.renderer.fullRender();
+    this.pulseIndicator();
+  }
+
+  // Счётчик «оживает» при смене листа — вырастает и пружинит обратно.
+  pulseIndicator() {
+    this.springPop(this.pageIndicator, 1.34, 'pulse');
+  }
+
+  // Пружинистый «поп» при нажатии на любую кнопку тулбаров — тот же живой
+  // отклик, что и у счётчика страниц. Делегируем в фазе capture, чтобы
+  // срабатывало даже на кнопках, гасящих всплытие клика («Настройки фона»).
+  initPressFx() {
+    const bars = [
+      document.querySelector('.toolbar'),
+      document.getElementById('pagebar'),
+      document.getElementById('gridMenu')
+    ].filter(Boolean);
+    const onPress = (e) => {
+      const btn = e.target.closest('.btn, .swatch, .size, .presence');
+      if (!btn || btn.disabled) return;
+      const inner = btn.querySelector('.m-icon, .dot, .pip') || btn;
+      this.springPop(inner, 0.8, 'tap-pop');
+    };
+    for (const bar of bars) bar.addEventListener('click', onPress, true);
+  }
+
+  // Единый пружинный эффект (GSAP back.out; без GSAP — CSS-класс).
+  // На время анимации гасим CSS-transition элемента, иначе он «смазывает»
+  // пружину покадрово (у счётчика страниц transition нет — потому он чёткий).
+  // Таймер-страховка + killTweensOf гарантируют, что иконка не «залипнет»
+  // уменьшенной, даже если rAF заморожен (фоновая вкладка / reduced-motion).
+  springPop(el, from, cssClass) {
+    if (!el) return;
+    if (window.gsap) {
+      window.gsap.killTweensOf(el);
+      if (el._popTimer) clearTimeout(el._popTimer);
+      el.style.transition = 'none';
+      window.gsap.fromTo(el,
+        { scale: from },
+        {
+          scale: 1, duration: 0.42, ease: 'back.out(2.6)',
+          onComplete: () => this.clearPop(el)
+        }
+      );
+      el._popTimer = setTimeout(() => this.clearPop(el), 520);
+    } else {
+      el.classList.remove(cssClass);
+      void el.offsetWidth;
+      el.classList.add(cssClass);
+    }
+  }
+
+  clearPop(el) {
+    if (!el) return;
+    if (el._popTimer) { clearTimeout(el._popTimer); el._popTimer = null; }
+    if (window.gsap) window.gsap.killTweensOf(el);
+    el.style.transform = '';
+    el.style.transition = '';
+  }
+
+  // --- Export PNG (текущая страница) ---
 
   exportPNG() {
     const margin = 40;
+    const cur = this.storage.currentPageId;
     const fullW = BOARD_W;                                    // единая ширина холста
     const viewWorldH = this.renderer.H / this.renderer.scale; // видимая высота (мир)
-    const fullH = Math.max(Math.round(viewWorldH), Math.ceil(this.storage.contentBottom) + margin);
+    const pageBottom = this.storage.pageContentBottom(cur);
+    // Экспортируем текущую страницу: по содержимому, но не выше PAGE_H.
+    const fullH = Math.min(PAGE_H, Math.max(Math.round(viewWorldH), Math.ceil(pageBottom) + margin));
     const scale = Math.min(1, MAX_EXPORT_H / fullH);
     const outW = Math.round(fullW * scale), outH = Math.round(fullH * scale);
 
@@ -1203,8 +1371,9 @@ export class ToolManager {
     bx.fillStyle = '#ffffff';
     bx.fillRect(0, 0, fullW, fullH);
 
-    this.renderer.drawGrid(bx, 0, fullW, fullH);
+    this.renderer.drawGrid(bx, 0, fullW, fullH, PAGE_H);
     for (const im of this.storage.images) {
+      if (im.page !== cur) continue;
       if (im.img.complete && im.img.naturalWidth) {
         bx.drawImage(im.img, im.x, im.y, im.w, im.h);
       }
@@ -1217,16 +1386,17 @@ export class ToolManager {
     const ix = il.getContext('2d');
     ix.scale(scale, scale);
     for (const s of this.storage.strokes) {
-      this.renderer.drawStrokeTo(ix, s, 0);
+      if (s.page === cur) this.renderer.drawStrokeTo(ix, s, 0);
     }
 
     bx.drawImage(il, 0, 0, fullW, fullH);
 
+    const pageNo = this.storage.currentPageIndex() + 1;
     bg.toBlob(blob => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `whiteboard-${this.storage.boardId}.png`;
+      a.download = `whiteboard-${this.storage.boardId}-p${pageNo}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();

@@ -189,7 +189,7 @@ export class NetworkManager {
     this.lastCursorPoint = { x: point.x, y: point.y };
     this.sendEphemeral({
       type: 'cursorMove',
-      payload: { x: point.x, y: point.y }
+      payload: { x: point.x, y: point.y, page: this.storage.currentPageId }
     });
   }
 
@@ -244,7 +244,7 @@ export class NetworkManager {
 
   // --- Buffering outgoing points (30-60 FPS) ---
 
-  startStroke(strokeId, tool, color, size, startPoint) {
+  startStroke(strokeId, tool, color, size, startPoint, page) {
     this.currentStrokeId = strokeId;
     this.bufferedPoints = [this.encodePoint(startPoint)];
     this.lastCursorPoint = null;
@@ -254,6 +254,7 @@ export class NetworkManager {
       type: 'beginStroke',
       payload: {
         strokeId: strokeId,
+        page: page,
         tool: tool,
         color: color,
         size: size,
@@ -325,6 +326,12 @@ export class NetworkManager {
     if (EPHEMERAL_TYPES.has(msg.type)) {
       if (msg.type === 'cursorMove' && !this.remoteWritingClients.has(msg.client)) {
         const payload = msg.payload || {};
+        // Курсор с другой страницы не показываем на текущей.
+        if (payload.page && payload.page !== this.storage.currentPageId) {
+          this.clearRemoteCursorDelay(msg.client);
+          this.setRemoteCursor(msg.client, null);
+          return;
+        }
         const point = {
           x: Number(payload.x),
           y: Number(payload.y)
@@ -351,17 +358,22 @@ export class NetworkManager {
         this.setRemoteCursor(msg.client, null);
         const stroke = {
           id: payload.strokeId,
+          page: payload.page || this.storage.currentPageId,
           tool: payload.tool,
           color: payload.color,
           size: payload.size,
           points: pts
         };
+        this.storage.ensurePage(stroke.page);
         this.storage.computeBBox(stroke);
         this.storage.strokes.push(stroke);
         this.storage.extendBottom(stroke);
         const lastPt = pts[pts.length - 1];
         if (lastPt) this.remoteStrokeLastPoint.set(msg.client, lastPt);
-        this.focusRemotePoint(lastPt, msg.client, payload.strokeId);
+        // Автопрокрутка к чужому штриху — только если он на нашей странице.
+        if (stroke.page === this.storage.currentPageId) {
+          this.focusRemotePoint(lastPt, msg.client, payload.strokeId);
+        }
         break;
       }
       case 'appendPoints': {
@@ -378,7 +390,9 @@ export class NetworkManager {
           this.storage.extendBottomPoints(newPts);
           const lastPt = newPts[newPts.length - 1];
           if (lastPt) this.remoteStrokeLastPoint.set(msg.client, lastPt);
-          this.focusRemotePoint(lastPt, msg.client, payload.strokeId);
+          if (stroke.page === this.storage.currentPageId) {
+            this.focusRemotePoint(lastPt, msg.client, payload.strokeId);
+          }
         }
         break;
       }
@@ -416,11 +430,13 @@ export class NetworkManager {
           const idx = this.storage.strokes.findIndex(s => s.id === id);
           const strokeObj = {
             id: id,
+            page: data.page || this.storage.currentPageId,
             tool: data.tool,
             color: data.color,
             size: data.size,
             points: data.points
           };
+          this.storage.ensurePage(strokeObj.page);
           this.storage.computeBBox(strokeObj);
           if (idx >= 0) {
             this.storage.strokes[idx] = strokeObj;
@@ -431,6 +447,7 @@ export class NetworkManager {
           const idx = this.storage.images.findIndex(im => im.id === id);
           const img = {
             id: id,
+            page: data.page || this.storage.currentPageId,
             src: data.src,
             x: data.x,
             y: data.y,
@@ -438,6 +455,7 @@ export class NetworkManager {
             h: data.h,
             img: new Image()
           };
+          this.storage.ensurePage(img.page);
           img.img.onload = () => this.onMessageReceived();
           img.img.src = data.src;
           if (idx >= 0) {
@@ -466,6 +484,7 @@ export class NetworkManager {
         const payload = msg.payload;
         const img = {
           id: payload.imageId,
+          page: payload.page || this.storage.currentPageId,
           src: payload.src,
           x: payload.x,
           y: payload.y,
@@ -473,6 +492,7 @@ export class NetworkManager {
           h: payload.h,
           img: new Image()
         };
+        this.storage.ensurePage(img.page);
         img.img.onload = () => this.onMessageReceived();
         img.img.src = payload.src;
         this.storage.images.push(img);
@@ -482,6 +502,20 @@ export class NetworkManager {
       case 'changeGrid': {
         this.storage.gridType = msg.payload.grid;
         window.dispatchEvent(new CustomEvent('gridChanged'));
+        break;
+      }
+      case 'addPage': {
+        this.storage.insertPageAfter(msg.payload.afterId, msg.payload.pageId);
+        window.dispatchEvent(new CustomEvent('pagesChanged'));
+        break;
+      }
+      case 'deletePage': {
+        const removed = this.storage.removePage(msg.payload.pageId);
+        if (removed) {
+          this.storage.selection = null;
+          this.storage.selected = null;
+          window.dispatchEvent(new CustomEvent('pagesChanged'));
+        }
         break;
       }
       case 'clearBoard': {
