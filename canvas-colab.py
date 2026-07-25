@@ -21,7 +21,7 @@ subprocess.run(
 )
 
 subprocess.Popen(
-    ["python3", "app.py"],
+    ["python3", "canvas/app.py"],
 )
 
 time.sleep(5)
