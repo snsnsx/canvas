@@ -406,6 +406,10 @@ async def get_history():
 async def get_canvas():
     return FileResponse(os.path.join(BASE, "canvas.js"), media_type="application/javascript", headers=JS_HEADERS)
 
+@app.get("/freehand.js")
+async def get_freehand():
+    return FileResponse(os.path.join(BASE, "freehand.js"), media_type="application/javascript", headers=JS_HEADERS)
+
 @app.get("/network.js")
 async def get_network():
     return FileResponse(os.path.join(BASE, "network.js"), media_type="application/javascript", headers=JS_HEADERS)

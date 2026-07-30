@@ -1,4 +1,10 @@
 import { HL_ALPHA, BOARD_W, PAGE_H } from './storage.js';
+import { getStrokeOutline, inkPath } from './freehand.js';
+
+// Отклик пера на нажим. Половина нажима = номинальная толщина, а к краям
+// диапазона кривая расходится: лёгкое касание заметно тоньше, нажим — заметно
+// толще. Так ведут себя кисти Procreate, линейный отклик рядом с ними «мёртвый».
+const PRESSURE_EASE = t => 0.45 * t + 0.55 * t * t * (3 - 2 * t);
 
 // Небольшой запас прокрутки ниже конца страницы, чтобы граница листа
 // (разделитель + фон приложения) была видна — лист ощущается ограниченным.
@@ -33,6 +39,7 @@ export class CanvasRenderer {
     this.cssCache = {};
 
     this.activeStroke = null;   // штрих в процессе рисования (доносится поверх кэша)
+    this.inkPaths = new WeakMap(); // готовые контуры штрихов (мировые координаты)
     this.lassoPath = null;      // активный контур лассо в мировых координатах
     this.remoteCursors = new Map();
     this._raf = null;           // id запланированного кадра рендера
@@ -285,16 +292,18 @@ export class CanvasRenderer {
       if (s.tool === 'highlighter') ctx.globalAlpha = HL_ALPHA;
     }
 
-    const points = this.normalizeStrokePoints(pts, camY);
-
+    // Перо и маркер — заливка контура пера (см. freehand.js), ластик — обычная
+    // обводка постоянной толщины.
     if (s.tool === 'pen' || s.tool === 'highlighter') {
-      this.drawTldrawInk(ctx, points, s.size, s.tool);
+      ctx.translate(0, -camY);                  // контур построен в мировых координатах
+      ctx.fill(this.strokeInkPath(s));
       ctx.restore();
       return;
     }
 
+    const points = this.normalizeStrokePoints(pts, camY);
     ctx.lineWidth = s.size;
-    if (pts.length === 1) {
+    if (points.length === 1) {
       ctx.beginPath();
       ctx.arc(points[0].x, points[0].y, Math.max(0.6, s.size / 2), 0, Math.PI * 2);
       ctx.fill();
@@ -328,102 +337,83 @@ export class CanvasRenderer {
     ctx.lineTo(last.x, last.y);
   }
 
-  drawTldrawInk(ctx, rawPts, size, tool = 'pen') {
-    const pts = this.prepareInkPoints(rawPts);
-    if (!pts.length) return;
-
-    const highlighter = tool === 'highlighter';
-    if (pts.length === 1) {
-      ctx.beginPath();
-      ctx.arc(pts[0].x, pts[0].y, Math.max(0.9, size * 0.5), 0, Math.PI * 2);
-      ctx.fill();
-      return;
+  // Контур пера считается в мировых координатах и кэшируется на стороне
+  // рендерера (WeakMap, а не поле штриха: штрихи уходят в JSON и по сети).
+  // При прокрутке готовые штрихи не пересчитываются — меняется только сдвиг
+  // камеры. Активный штрих растёт каждый кадр, его контур всегда свежий.
+  strokeInkPath(s) {
+    if (s === this.activeStroke) {
+      return inkPath(getStrokeOutline(this.normalizeStrokePoints(s.points, 0), this.inkOptions(s, false)));
     }
-
-    const left = [];
-    const right = [];
-    const lastIndex = pts.length - 1;
-    const distances = [0];
-    let total = 0;
-
-    for (let i = 1; i < pts.length; i++) {
-      total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-      distances[i] = total;
-    }
-
-    const baseRadius = size * 0.5;
-    const taperDistance = highlighter
-      ? Math.max(size * 0.9, 14)
-      : Math.max(size * 2.25, 12);
-    const minTaper = highlighter ? 0.58 : 0.18;
-
-    for (let i = 0; i < pts.length; i++) {
-      const prev = pts[Math.max(0, i - 1)];
-      const next = pts[Math.min(lastIndex, i + 1)];
-      let dx = next.x - prev.x;
-      let dy = next.y - prev.y;
-      const len = Math.hypot(dx, dy) || 1;
-      dx /= len;
-      dy /= len;
-
-      const travel = i === 0 ? 0 : Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-      const pressure = pts[i].pressure ?? Math.max(0.35, 0.72 - Math.min(0.45, travel / 42));
-      const pressureWidth = highlighter
-        ? 0.96 + pressure * 0.08
-        : 0.62 + pressure * 0.58;
-      const startTaper = Math.min(1, distances[i] / taperDistance);
-      const endTaper = Math.min(1, (total - distances[i]) / taperDistance);
-      const taperEase = 1 - Math.pow(1 - Math.min(startTaper, endTaper), 3);
-      const taper = minTaper + (1 - minTaper) * taperEase;
-      const radius = Math.max(0.75, baseRadius * pressureWidth * taper);
-
-      const nx = -dy * radius;
-      const ny = dx * radius;
-      left.push({ x: pts[i].x + nx, y: pts[i].y + ny });
-      right.push({ x: pts[i].x - nx, y: pts[i].y - ny });
-    }
-
-    const outline = left.concat(right.reverse());
-    ctx.beginPath();
-    ctx.moveTo(outline[0].x, outline[0].y);
-    for (let i = 1; i < outline.length; i++) {
-      const a = outline[i];
-      const b = outline[(i + 1) % outline.length];
-      ctx.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
-    }
-    ctx.closePath();
-    ctx.fill();
+    const sig = this.inkSignature(s);
+    const cached = this.inkPaths.get(s);
+    if (cached && cached.sig === sig) return cached.path;
+    const path = inkPath(getStrokeOutline(this.normalizeStrokePoints(s.points, 0), this.inkOptions(s, true)));
+    this.inkPaths.set(s, { sig, path });
+    return path;
   }
 
-  prepareInkPoints(rawPts) {
-    const compact = [];
-    for (const p of rawPts) {
-      const last = compact[compact.length - 1];
-      if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= 0.7) {
-        compact.push(p);
-      }
-    }
-    if (compact.length < 3) return compact;
-
-    const smooth = [compact[0]];
-    for (let i = 1; i < compact.length - 1; i++) {
-      const a = compact[i - 1];
-      const b = compact[i];
-      const c = compact[i + 1];
-      smooth.push({
-        x: a.x * 0.18 + b.x * 0.64 + c.x * 0.18,
-        y: a.y * 0.18 + b.y * 0.64 + c.y * 0.18,
-        pressure: this.mixPressure(a, b, c)
-      });
-    }
-    smooth.push(compact[compact.length - 1]);
-    return smooth;
+  // Кэш сбрасывается, если точки дописали (лайв-штрих соседа) или сдвинули (лассо).
+  inkSignature(s) {
+    const pts = s.points;
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    const ax = a.x !== undefined ? a.x : a[0];
+    const ay = a.y !== undefined ? a.y : a[1];
+    const bx = b.x !== undefined ? b.x : b[0];
+    const by = b.y !== undefined ? b.y : b[1];
+    return `${pts.length}|${s.size}|${ax},${ay}|${bx},${by}`;
   }
 
-  mixPressure(a, b, c) {
-    const vals = [a.pressure, b.pressure, c.pressure].filter(Number.isFinite);
-    if (!vals.length) return undefined;
-    return vals.reduce((sum, value) => sum + value, 0) / vals.length;
+  // Характер инструмента: маркер — ровная ширина как у настоящего маркера,
+  // ручка — толщина по нажиму стилуса, а без стилуса по скорости движения.
+  inkOptions(s, isComplete) {
+    const size = s.size;
+    if (s.tool === 'highlighter') {
+      return {
+        size,
+        thinning: 0,
+        smoothing: 0.55,
+        streamline: 0.5,
+        simulatePressure: false,
+        last: isComplete
+      };
+    }
+
+    if (this.hasRealPressure(s)) {
+      return {
+        size,
+        thinning: 0.55,
+        smoothing: 0.5,
+        streamline: 0.42,          // стилус точен — шлейф короче, линия не отстаёт
+        simulatePressure: false,
+        easing: PRESSURE_EASE,
+        taperEnd: size * 1.4,      // отрыв пера сводит линию на нет
+        last: isComplete
+      };
+    }
+
+    return {
+      size,
+      thinning: 0.42,              // без нажима ширину даёт скорость — диапазон уже
+      smoothing: 0.5,
+      streamline: 0.6,             // мышь/трекпад дрожат сильнее — шлейф длиннее
+      simulatePressure: true,
+      taperStart: size * 0.8,
+      taperEnd: size * 1.6,
+      last: isComplete
+    };
+  }
+
+  hasRealPressure(s) {
+    const pts = s.points;
+    const n = Math.min(pts.length, 8);
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const v = p.p ?? p.pressure ?? p[2];
+      if (Number.isFinite(v) && v > 0) return true;
+    }
+    return false;
   }
 
   renderBack() {

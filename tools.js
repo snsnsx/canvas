@@ -578,6 +578,10 @@ export class ToolManager {
 
       this.network.endStroke(); // Flushes points and closes stroke
 
+      // Штрих больше не активный: в кэш он должен попасть уже завершённым —
+      // с концевой шапкой и без «шлейфа» на хвосте.
+      this.activeStroke = null;
+      this.renderer.activeStroke = null;
       this.renderer.drawStrokeTo(this.renderer.cacheCtx, s, this.storage.cameraY);
       this.renderer.blitInk();
       this.storage.extendBottom(s);
