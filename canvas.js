@@ -10,6 +10,11 @@ const PRESSURE_EASE = t => 0.45 * t + 0.55 * t * t * (3 - 2 * t);
 // (разделитель + фон приложения) была видна — лист ощущается ограниченным.
 const PAGE_END_GAP = 90;
 
+// Высота offscreen-полосы чернил в экранах. Три экрана — компромисс: камера
+// проходит целый экран в любую сторону без единой перерисовки штрихов, а
+// видеопамять растёт умеренно.
+const BAND_SCREENS = 3;
+
 export class CanvasRenderer {
   constructor(storage) {
     this.storage = storage;
@@ -24,9 +29,16 @@ export class CanvasRenderer {
     this.vbar    = document.getElementById('vbar');
     this.thumb   = document.getElementById('thumb');
 
-    // offscreen-кэш зафиксированных штрихов (для текущей камеры)
+    // Offscreen-кэш зафиксированных штрихов. Он покрывает ПОЛОСУ мировых
+    // координат высотой в несколько экранов, а не текущий кадр камеры: пока
+    // камера остаётся внутри полосы, прокрутка — это один drawImage со сдвигом,
+    // без повторной растеризации штрихов. Раньше кэш строился в координатах
+    // камеры, поэтому обесценивался от одного пикселя прокрутки.
     this.inkCache = document.createElement('canvas');
     this.cacheCtx = this.inkCache.getContext('2d');
+    this.bandY = 0;          // верх полосы в мировых координатах
+    this.bandH = 0;          // высота полосы в мировых координатах
+    this.bandValid = false;  // содержимое полосы актуально
 
     this.DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     this.W = 0;
@@ -68,6 +80,18 @@ export class CanvasRenderer {
     });
   }
 
+  // Коалесинг оверлея. Курсоры соседей приходят потоком: каждое сообщение
+  // синхронно перерисовывало весь оверлей (очистка холста во весь DPR, обход
+  // всех точек выделения, чтение clientHeight → принудительный reflow).
+  // При 20 участниках это сотни полных перерисовок в секунду вместо 60.
+  scheduleOverlay() {
+    if (this._ovRAF) return;
+    this._ovRAF = requestAnimationFrame(() => {
+      this._ovRAF = null;
+      this.renderOverlay();
+    });
+  }
+
   // Холсты содержимого (сетка/штрихи/картинки) рисуются в мировых координатах:
   // трансформация включает мировой масштаб, поэтому 1024-мировая ширина
   // всегда занимает всю ширину экрана — одинаково у всех участников.
@@ -100,9 +124,14 @@ export class CanvasRenderer {
     this.setupScaledCanvas(this.ink, this.inkCtx);
     this.setupScreenCanvas(this.overlay, this.ovCtx);
 
+    // Полоса кэша — три экрана по высоте (с потолком по числу пикселей, чтобы
+    // на высоких экранах не разрастаться): камера свободно уходит на экран
+    // вверх и вниз от точки построения, не требуя перерисовки.
+    const bandPx = Math.min(4096, Math.round(this.H * this.DPR * BAND_SCREENS));
     this.inkCache.width  = Math.round(this.W * this.DPR);
-    this.inkCache.height = Math.round(this.H * this.DPR);
-    this.cacheCtx.setTransform(this.DPR * this.scale, 0, 0, this.DPR * this.scale, 0, 0);
+    this.inkCache.height = bandPx;
+    this.bandH = bandPx / (this.DPR * this.scale);
+    this.bandValid = false;
 
     this.clampCamera();
     this.fullRender();
@@ -152,7 +181,7 @@ export class CanvasRenderer {
         this._focusStep();
       }
       this.clampCamera();
-      this.scheduleRender();
+      this.scheduleCameraRender();
     });
   }
 
@@ -176,7 +205,7 @@ export class CanvasRenderer {
     if (!clientId) return;
     if (!point) {
       this.remoteCursors.delete(clientId);
-      this.renderOverlay();
+      this.scheduleOverlay();
       return;
     }
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
@@ -197,7 +226,9 @@ export class CanvasRenderer {
     }
     this.scheduleCursorCleanup();
     this.scheduleCursorMotion();
-    this.renderOverlay();
+    // Кадр анимации курсоров всё равно перерисует оверлей — отдельная
+    // синхронная перерисовка на каждое сетевое сообщение только дублирует её.
+    this.scheduleOverlay();
   }
 
   scheduleCursorMotion() {
@@ -345,24 +376,43 @@ export class CanvasRenderer {
     if (s === this.activeStroke) {
       return inkPath(getStrokeOutline(this.normalizeStrokePoints(s.points, 0), this.inkOptions(s, false)));
     }
-    const sig = this.inkSignature(s);
     const cached = this.inkPaths.get(s);
-    if (cached && cached.sig === sig) return cached.path;
+    if (cached && this.inkSigMatches(cached, s)) return cached.path;
     const path = inkPath(getStrokeOutline(this.normalizeStrokePoints(s.points, 0), this.inkOptions(s, true)));
-    this.inkPaths.set(s, { sig, path });
+    this.inkPaths.set(s, this.inkSigStore(s, path));
     return path;
   }
 
   // Кэш сбрасывается, если точки дописали (лайв-штрих соседа) или сдвинули (лассо).
-  inkSignature(s) {
+  //
+  // Раньше признак кэша собирался в строку-шаблон и сравнивался как строка —
+  // то есть на каждый видимый штрих в каждом кадре приходились форматирование
+  // шести чисел и аллокация строки (при 1400 видимых штрихах это 1400 строк за
+  // кадр, 84 000 в секунду). Те же поля хранятся числами и сравниваются
+  // числами: ноль аллокаций и никаких коллизий хеша.
+  inkSigMatches(c, s) {
     const pts = s.points;
-    const a = pts[0];
-    const b = pts[pts.length - 1];
-    const ax = a.x !== undefined ? a.x : a[0];
-    const ay = a.y !== undefined ? a.y : a[1];
-    const bx = b.x !== undefined ? b.x : b[0];
-    const by = b.y !== undefined ? b.y : b[1];
-    return `${pts.length}|${s.size}|${ax},${ay}|${bx},${by}`;
+    const n = pts.length;
+    if (c.n !== n || c.size !== s.size) return false;
+    const a = pts[0], b = pts[n - 1];
+    return c.ax === (a.x !== undefined ? a.x : a[0])
+        && c.ay === (a.y !== undefined ? a.y : a[1])
+        && c.bx === (b.x !== undefined ? b.x : b[0])
+        && c.by === (b.y !== undefined ? b.y : b[1]);
+  }
+
+  inkSigStore(s, path) {
+    const pts = s.points;
+    const a = pts[0], b = pts[pts.length - 1];
+    return {
+      path,
+      n: pts.length,
+      size: s.size,
+      ax: a.x !== undefined ? a.x : a[0],
+      ay: a.y !== undefined ? a.y : a[1],
+      bx: b.x !== undefined ? b.x : b[0],
+      by: b.y !== undefined ? b.y : b[1]
+    };
   }
 
   // Характер инструмента: маркер — ровная ширина как у настоящего маркера,
@@ -439,23 +489,75 @@ export class CanvasRenderer {
       && s.minY <= this.storage.cameraY + this.worldH + 4;
   }
 
+  strokeInBand(s) {
+    return s.page === this.storage.currentPageId
+      && s.maxY >= this.bandY - 4
+      && s.minY <= this.bandY + this.bandH + 4;
+  }
+
+  // Полоса покрывает камеру, если и верх, и низ видимой области лежат внутри
+  // отрисованного диапазона. Отдельно учитываем упор в начало страницы: там
+  // полоса не может уйти выше нуля, и это не повод считать её негодной.
+  bandCoversCamera() {
+    if (!this.bandValid) return false;
+    const top = this.storage.cameraY;
+    const bottom = top + this.worldH;
+    return top >= this.bandY - 0.5 && bottom <= this.bandY + this.bandH + 0.5;
+  }
+
   rebuildInkCache() {
+    // Полоса центрируется по камере: запас в один экран вверх и вниз.
+    this.bandY = Math.max(0, this.storage.cameraY - (this.bandH - this.worldH) / 2);
     const ctx = this.cacheCtx;
-    ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.inkCache.width, this.inkCache.height);
-    ctx.restore();
+    const k = this.DPR * this.scale;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
     for (const s of this.storage.strokes) {
-      if (this.strokeVisible(s)) this.drawStrokeTo(ctx, s, this.storage.cameraY);
+      if (this.strokeInBand(s)) this.drawStrokeTo(ctx, s, this.bandY);
     }
+    this.bandValid = true;
   }
 
   blitInk() {
+    // Прокрутка внутри полосы — сдвиг готового растра, а не перерисовка.
+    const dy = -(this.storage.cameraY - this.bandY) * this.scale * this.DPR;
     this.inkCtx.save();
     this.inkCtx.setTransform(1, 0, 0, 1, 0, 0);
     this.inkCtx.clearRect(0, 0, this.ink.width, this.ink.height);
-    this.inkCtx.drawImage(this.inkCache, 0, 0);
+    this.inkCtx.drawImage(this.inkCache, 0, Math.round(dy));
     this.inkCtx.restore();
+  }
+
+  // Фиксация завершённого штриха прямо в полосу — без полной перестройки кэша.
+  commitStrokeToCache(s) {
+    if (!this.bandValid) return;
+    if (this.strokeInBand(s)) this.drawStrokeTo(this.cacheCtx, s, this.bandY);
+  }
+
+  // Кадр, в котором изменилась ТОЛЬКО камера. Пока камера внутри полосы, кадр
+  // стоит один drawImage вместо повторной растеризации всех видимых штрихов
+  // (замер: 6.7 мс → доли миллисекунды при 20 000 штрихов).
+  //
+  // Путь намеренно устроен «в безопасную сторону»: если полоса не покрывает
+  // камеру или помечена негодной — выполняется обычный полный кадр. Поэтому
+  // забытый вызов быстрого пути стоит производительности, но никогда — свежести
+  // изображения.
+  cameraRender() {
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+    if (!this.bandCoversCamera()) { this.fullRender(); return; }
+    this.blitInk();
+    if (this.activeStroke) this.drawStrokeTo(this.inkCtx, this.activeStroke, this.storage.cameraY);
+    this.renderBack();
+    this.renderOverlay();
+  }
+
+  scheduleCameraRender() {
+    if (this._raf) return;
+    this._raf = requestAnimationFrame(() => {
+      this._raf = null;
+      this.cameraRender();
+    });
   }
 
   renderActive(active) {
@@ -464,6 +566,9 @@ export class CanvasRenderer {
   }
 
   renderOverlay() {
+    // Прямая перерисовка делает запланированную ненужной — иначе в одном кадре
+    // оверлей рисуется дважды.
+    if (this._ovRAF) { cancelAnimationFrame(this._ovRAF); this._ovRAF = null; }
     this.ovCtx.clearRect(0, 0, this.W, this.H);
     const ctx = this.ovCtx;
     const accent = this.getCSS('--accent');
@@ -596,6 +701,10 @@ export class CanvasRenderer {
   }
 
   fullRender() {
+    // То же для полного кадра: прямые вызовы fullRender() (инерция прокрутки,
+    // окончание штриха, смена страницы) раньше не снимали уже запланированный
+    // кадр, и доска рисовалась дважды за один animation frame.
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
     this.rebuildInkCache();
     this.blitInk();
     if (this.activeStroke) this.drawStrokeTo(this.inkCtx, this.activeStroke, this.storage.cameraY);

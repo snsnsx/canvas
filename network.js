@@ -1,3 +1,5 @@
+import { decodePoints } from './storage.js';
+
 const EPHEMERAL_TYPES = new Set(['cursorMove', 'cursorLeave']);
 
 export class NetworkManager {
@@ -180,10 +182,14 @@ export class NetworkManager {
 
     const now = Date.now();
     const last = this.lastCursorPoint;
-    if (last && now - this.lastCursorSentAt < 60) {
-      const moved = Math.hypot(point.x - last.x, point.y - last.y);
-      if (moved < 4) return;
-    }
+    // Ограничитель частоты был инвертирован: он отбрасывал пакет только когда
+    // курсор почти стоит на месте, а ДВИЖУЩИЙСЯ курсор проходил без задержки —
+    // то есть отправлял кадр на каждый pointermove (60–120 в секунду вместо 16).
+    // Теперь окно в 60 мс действует всегда, а порог в 4 px дополнительно гасит
+    // дрожание неподвижного курсора. Видимое поведение то же: соседи и раньше
+    // видели курсор сглаженным (в canvas.js он интерполируется к цели).
+    if (now - this.lastCursorSentAt < 60) return;
+    if (last && Math.hypot(point.x - last.x, point.y - last.y) < 4) return;
 
     this.lastCursorSentAt = now;
     this.lastCursorPoint = { x: point.x, y: point.y };
@@ -272,10 +278,19 @@ export class NetworkManager {
     this.bufferedPoints.push(this.encodePoint(point));
   }
 
+  // Координата уходила в сеть с полной точностью float64: «240.23419203747073»
+  // — 18 значащих цифр, около 20 байт на число. Мир доски шириной 1024 px, и
+  // сотая доля мирового пикселя лежит далеко за пределом различимого даже при
+  // DPR 3, поэтому округление до сотых не меняет ни одной видимой точки, но
+  // сокращает точку в пакете примерно втрое. Округляем на клиенте, а не на
+  // сервере: тогда экономятся и байты каждого пакета, и процессорное время
+  // сервера при сохранении снимка.
   encodePoint(point) {
+    const x = Math.round(point.x * 100) / 100;
+    const y = Math.round(point.y * 100) / 100;
     const pressure = point.pressure ?? point.p;
-    if (Number.isFinite(pressure)) return [point.x, point.y, pressure];
-    return [point.x, point.y];
+    if (Number.isFinite(pressure)) return [x, y, Math.round(pressure * 1000) / 1000];
+    return [x, y];
   }
 
   decodePoint(point) {
@@ -378,7 +393,7 @@ export class NetworkManager {
       }
       case 'appendPoints': {
         const payload = msg.payload;
-        const stroke = this.storage.strokes.find(s => s.id === payload.strokeId);
+        const stroke = this.storage.strokeById(payload.strokeId);
         if (stroke) {
           const newPts = payload.points.map(p => this.decodePoint(p));
           this.clearRemoteCursorDelay(msg.client);
@@ -434,12 +449,13 @@ export class NetworkManager {
             tool: data.tool,
             color: data.color,
             size: data.size,
-            points: data.points
+            points: decodePoints(data.points)
           };
           this.storage.ensurePage(strokeObj.page);
           this.storage.computeBBox(strokeObj);
           if (idx >= 0) {
             this.storage.strokes[idx] = strokeObj;
+            this.storage.invalidateIndex();   // длина не изменилась, объект — да
           } else {
             this.storage.strokes.push(strokeObj);
           }
@@ -460,6 +476,7 @@ export class NetworkManager {
           img.img.src = data.src;
           if (idx >= 0) {
             this.storage.images[idx] = img;
+            this.storage.invalidateIndex();   // длина не изменилась, объект — да
           } else {
             this.storage.images.push(img);
           }
@@ -470,7 +487,7 @@ export class NetworkManager {
       }
       case 'moveObject': {
         const payload = msg.payload;
-        const img = this.storage.images.find(im => im.id === payload.objectId);
+        const img = this.storage.imageById(payload.objectId);
         if (img) {
           img.x = payload.x;
           img.y = payload.y;
