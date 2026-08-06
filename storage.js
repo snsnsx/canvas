@@ -51,6 +51,9 @@ export class BoardStorage {
     // (id страницы). Одновременно отображается только currentPageId.
     this.pages = [DEFAULT_PAGE_ID];         // порядок страниц (общий для всех клиентов)
     this.currentPageId = DEFAULT_PAGE_ID;   // текущая видимая страница (локально у каждого)
+    // Позиция просмотра каждого листа. Как и currentPageId — величина локальная
+    // (у каждого участника свой взгляд на доску), поэтому в serialize не идёт.
+    this.pageScroll = new Map();            // pageId → cameraY
 
     this.strokes = [];                      // [{id, page, tool, color, size, points:[{x,y}], minY, maxY}]
     this.images  = [];                      // [{id, page, src, img, x, y, w, h}]
@@ -193,11 +196,30 @@ export class BoardStorage {
     this.strokes = this.strokes.filter(s => s.page !== id);
     this.images = this.images.filter(im => im.page !== id);
     this.pages.splice(at, 1);
+    this.pageScroll.delete(id);
     if (this.currentPageId === id) {
       this.currentPageId = this.pages[Math.min(at, this.pages.length - 1)];
+      // Лист мог быть удалён и удалённым клиентом — камера должна встать туда,
+      // где мы остановились на соседнем листе, а не остаться в чужой позиции.
+      this.cameraY = this.recallScroll(this.currentPageId);
     }
     this.recomputeContentBottom();
     return { index: at, strokes, images };
+  }
+
+  // --- Позиция просмотра по листам ---
+  //
+  // Блокнот листают туда-обратно: возврат на лист должен приводить в то место,
+  // где пользователь остановился, а не в начало страницы.
+
+  rememberScroll(pageId, y) {
+    if (!pageId || !Number.isFinite(y)) return;
+    this.pageScroll.set(pageId, Math.max(0, y));
+  }
+
+  recallScroll(pageId) {
+    const y = this.pageScroll.get(pageId);
+    return Number.isFinite(y) ? y : 0;
   }
 
   // Нижняя граница содержимого конкретной страницы (для экспорта).

@@ -492,6 +492,86 @@
     to { transform: scale(1); }
   }
 
+  /* Резинка листа: пока прокрутку продолжают за конец страницы, лист (и его
+     край) отъезжают на --pull, а отпущенный жест возвращает их пружиной. */
+  .stage.pulling canvas,
+  .stage.pulling .page-edge {
+    transform: translateY(var(--pull, 0px));
+  }
+
+  /* Край листа — тонкая линия с мягкой тенью: видно, что бумага кончилась
+     и её тянут за край. Позицию задаёт JS, она едет вместе с холстом. */
+  .page-edge {
+    position: absolute;
+    z-index: 4;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+      rgba(21, 21, 21, 0) 0%,
+      rgba(21, 21, 21, 0.15) 14%,
+      rgba(21, 21, 21, 0.15) 86%,
+      rgba(21, 21, 21, 0) 100%);
+    box-shadow: 0 7px 16px -7px rgba(0, 0, 0, 0.26);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* Индикатор продолжения: всплывает у края листа, когда прокрутку продолжают
+     дальше конца страницы, и заполняется кольцом, пока усилие удерживают. */
+  .page-hint {
+    position: fixed;
+    z-index: 25;
+    left: 50%;
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 58px);
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 14px 6px 6px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 570;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translate(-50%, 14px);
+    pointer-events: none;
+  }
+
+  .page-hint.top {
+    bottom: auto;
+    top: calc(var(--top-reserve) + 14px);
+  }
+
+  .page-hint svg {
+    display: block;
+    width: 26px;
+    height: 26px;
+    overflow: visible;
+  }
+
+  .hint-plus {
+    display: none;
+  }
+
+  .page-hint.create .hint-plus {
+    display: block;
+  }
+
+  .page-hint.create .hint-arrow {
+    display: none;
+  }
+
+  .page-hint.top .hint-arrow {
+    transform: rotate(180deg);
+    transform-origin: 12px 12px;
+  }
+
   /* Фолбэк пружинного «попа» при нажатии, если GSAP не загрузился. */
   .tap-pop {
     animation: tap-pop-kf 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -540,6 +620,15 @@
       padding: 5px;
       gap: 3px;
     }
+
+    /* Индикатор не должен налезать ни на toolbar сверху, ни на панель страниц снизу. */
+    .page-hint {
+      bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px);
+    }
+
+    .page-hint.top {
+      top: calc(var(--top-reserve) + 10px);
+    }
   }
 </style>
 </head>
@@ -549,6 +638,7 @@
     <canvas id="back"></canvas>
     <canvas id="ink"></canvas>
     <canvas id="overlay"></canvas>
+    <div id="pageEdge" class="page-edge" aria-hidden="true"></div>
     <div id="eraserCursor" class="eraser-cursor" aria-hidden="true"></div>
     <div id="vbar" class="vbar" aria-hidden="true">
       <div id="thumb" class="thumb"></div>
@@ -726,6 +816,18 @@
       </button>
     </div>
   </nav>
+
+  <div id="pageHint" class="page-hint" aria-hidden="true">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <defs><linearGradient id="i-hint" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse"><stop stop-color="#3ED2A7"/><stop offset="1" stop-color="#10A37F"/></linearGradient></defs>
+      <circle cx="12" cy="12" r="9.4" fill="none" stroke="rgba(21, 21, 21, 0.10)" stroke-width="2.4"/>
+      <circle id="pageHintRing" cx="12" cy="12" r="9.4" fill="none" stroke="url(#i-hint)" stroke-width="2.4"
+              stroke-linecap="round" stroke-dasharray="59.06" stroke-dashoffset="59.06" transform="rotate(-90 12 12)"/>
+      <path class="hint-arrow" d="M12 8.1v7.6M8.8 12.6 12 15.8l3.2-3.2" fill="none" stroke="var(--ui-strong)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path class="hint-plus" d="M12 8.3v7.4M8.3 12h7.4" fill="none" stroke="var(--ui-strong)" stroke-width="1.9" stroke-linecap="round"/>
+    </svg>
+    <span id="pageHintLabel" class="page-hint-label">Новая страница</span>
+  </div>
 
   <input id="fileInput" class="sr-only" type="file" accept="image/*">
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

@@ -8,6 +8,22 @@ import {
   generateUUID
 } from './storage.js';
 
+// --- Жест «дотянуть до следующего листа» ---
+//
+// Всё меряется в экранных px: и колесо, и палец дают экранные дельты, а порог
+// усилия должен ощущаться одинаково на любом масштабе холста.
+const PULL_MAX   = 88;    // предел растяжения резинки (дальше усилие уходит «в вату»)
+const PULL_ARM   = 48;    // с этого растяжения жест начинает заряжаться
+const PULL_HOLD  = 520;   // мс удержания усилия до перехода
+const PULL_IDLE  = 150;   // мс без нового усилия — резинку отпустили
+const PULL_VIS   = 0.55;  // какую долю растяжения проезжает сам лист
+const PULL_ENTRY = 92;    // с какого смещения «влетает» новый лист
+const PULL_COOL  = 450;   // пауза после перехода: одно усилие — один лист
+const PULL_K     = 210;   // жёсткость пружины возврата
+const PULL_C     = 21;    // затухание пружины (чуть меньше критического — лёгкий отскок)
+const WHEEL_GAP  = 120;   // пауза, разделяющая два прокрута колесом
+const RING_LEN   = 2 * Math.PI * 9.4;   // длина кольца индикатора (r=9.4 в разметке)
+
 export class ToolManager {
   constructor(storage, renderer, network, history) {
     this.storage = storage;
@@ -38,6 +54,30 @@ export class ToolManager {
     this.lassoOriginal = null;
 
     this.sbTimer = null;
+
+    // Жест продолжения: усилие, которое не влезло в лист, тянет «резинку».
+    this.pull = {
+      dir: 0,            // +1 — тянем за нижний край, -1 — за верхний
+      raw: 0,            // накопленное усилие (экранные px, до демпфирования)
+      stretch: 0,        // фактическое растяжение резинки
+      charge: 0,         // 0…1 — насколько удержано усилие
+      offset: 0,         // текущее смещение листа (экранные px, со знаком)
+      vel: 0,            // скорость пружины возврата
+      releasing: false,  // фаза возврата/влёта — пользователь уже не тянет
+      entering: false,   // влёт нового листа: индикатор в этой фазе не нужен
+      lastPushAt: 0,
+      lastTickAt: 0,
+      cooldownUntil: 0,
+      raf: null
+    };
+    this._wheelAt = 0;        // время последнего события колеса
+    this._wheelMag = 0;       // его дельта — по ней узнаём новый рывок
+    this._wheelFromEdge = false;
+
+    this.pullHint = document.getElementById('pageHint');
+    this.pullRing = document.getElementById('pageHintRing');
+    this.pullLabel = document.getElementById('pageHintLabel');
+    this.pullEdge = document.getElementById('pageEdge');
 
     this.fileInput = document.getElementById('fileInput');
     this.overlay = document.getElementById('overlay');
@@ -75,8 +115,21 @@ export class ToolManager {
       this.renderer.stopFocus();
       this.stopMomentum();
       const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-      this.storage.cameraY += d / this.renderer.scale;
+      const dir = d > 0 ? 1 : -1;
+      // Рывок, который сам довёл камеру до края листа, резинку не тянет —
+      // тянет только следующий, то есть повторная попытка прокрутить дальше.
+      const armed = this.wheelBurstFromEdge(d, this.atPageEdge(dir));
+
+      const desired = this.storage.cameraY + d / this.renderer.scale;
+      this.storage.cameraY = desired;
       this.renderer.clampCamera();
+      const leftover = (desired - this.storage.cameraY) * this.renderer.scale;
+
+      if (leftover) {
+        if (armed) this.pullPush(Math.abs(leftover), leftover > 0 ? 1 : -1, false);
+      } else {
+        this.releasePull();   // прокрутили обратно внутрь листа — резинка не нужна
+      }
       this.renderer.scheduleCameraRender();
       this.showScrollbar();
       this.hideScrollbarLater();
@@ -105,7 +158,12 @@ export class ToolManager {
     document.getElementById('addPageBtn')?.addEventListener('click', () => this.addPage());
     document.getElementById('delPageBtn')?.addEventListener('click', () => this.deleteCurrentPage());
     // Обновление индикатора при изменениях страниц от удалённых клиентов / загрузки.
-    window.addEventListener('pagesChanged', () => this.updatePageUI());
+    // Удалённое удаление листа могло переставить камеру на соседний — вписываем
+    // её в текущий размер окна.
+    window.addEventListener('pagesChanged', () => {
+      this.renderer.clampCamera();
+      this.updatePageUI();
+    });
     this.updatePageUI();
 
     // Image Upload
@@ -618,8 +676,15 @@ export class ToolManager {
     this.network.pauseAutoFocus(1200);
     const now = performance.now();
     const k = this.renderer.scale;
-    this.storage.cameraY = this.panStartCam - (e.clientY - this.panStartY) / k;
+    const desired = this.panStartCam - (e.clientY - this.panStartY) / k;
+    this.storage.cameraY = desired;
     this.renderer.clampCamera();
+
+    // Палец держит растяжение сам: усилие здесь абсолютное (насколько увели
+    // палец за край листа), поэтому оно не копится, а просто следует за рукой.
+    const leftover = (desired - this.storage.cameraY) * k;
+    if (leftover) this.pullPush(Math.abs(leftover), leftover > 0 ? 1 : -1, true);
+    else this.releasePull();
 
     const dt = Math.max(1, now - this.panLastT);
     this.panVel = -((e.clientY - this.panLastY) / dt) / k; // мировых px/ms
@@ -631,6 +696,7 @@ export class ToolManager {
 
   endPan() {
     this.panPid = null;
+    this.releasePull();
     if (Math.abs(this.panVel) > 0.02) this.startMomentum();
     else this.hideScrollbarLater();
   }
@@ -668,6 +734,203 @@ export class ToolManager {
     }
   }
 
+  // --- Жест продолжения: дотянуть лист до следующей страницы ---
+  //
+  // Камера упирается в конец листа (clampCamera), и остаток усилия деть некуда.
+  // Этот остаток растягивает «резинку»: лист отъезжает, у края всплывает
+  // индикатор, кольцо заполняется — но только пока усилие держат. Обычная
+  // прокрутка до конца страницы кольцо не заряжает: рывок, который сам довёл
+  // камеру до края, в счёт не идёт (wheelBurstFromEdge), а инерция броска — тем
+  // более, она гасится о край ещё в startMomentum.
+
+  atPageEdge(dir) {
+    const cam = this.storage.cameraY;
+    return dir > 0 ? cam >= this.renderer.maxCamera() - 0.5 : cam <= 0.5;
+  }
+
+  // Колесо и трекпад не «отпускаются», как палец: события идут слитным потоком.
+  // Считаем прокрут одним рывком, пока паузы между событиями меньше WHEEL_GAP
+  // и дельта не растёт: инерция трекпада только затухает, поэтому рост дельты
+  // означает, что человек толкнул заново.
+  wheelBurstFromEdge(delta, atEdge) {
+    const now = performance.now();
+    const mag = Math.abs(delta);
+    if (now - this._wheelAt > WHEEL_GAP || mag > this._wheelMag * 1.6 + 2) {
+      this._wheelFromEdge = atEdge;
+    }
+    this._wheelAt = now;
+    this._wheelMag = mag;
+    return this._wheelFromEdge;
+  }
+
+  // Куда ведёт жест: на соседний лист, а в конце блокнота — на новый.
+  pullTarget(dir) {
+    if (!dir) return null;
+    const idx = this.storage.currentPageIndex();
+    if (dir > 0) {
+      return idx < this.storage.pages.length - 1
+        ? { index: idx + 1, label: `Страница ${idx + 2}` }
+        : { index: -1, label: 'Новая страница' };
+    }
+    return idx > 0 ? { index: idx - 1, label: `Страница ${idx}` } : null;
+  }
+
+  // excess — усилие мимо края листа (экранные px). absolute: палец держит
+  // растяжение сам (усилие позиционно), колесо же его накапливает.
+  pullPush(excess, dir, absolute) {
+    const p = this.pull;
+    if (!(excess > 0.5) || p.entering) return;
+    if (performance.now() < p.cooldownUntil) return;
+    if (!this.pullTarget(dir)) return;            // выше первого листа тянуть некуда
+
+    if (p.dir !== dir) { p.dir = dir; p.raw = 0; p.charge = 0; }
+    p.raw = absolute ? excess : p.raw + excess;
+    // Демпфирование как у резинки: чем сильнее растянута, тем меньше отдаёт
+    // каждый следующий px усилия — дальше PULL_MAX лист не уедет.
+    p.stretch = PULL_MAX * (1 - Math.exp(-p.raw / PULL_MAX));
+    p.offset = -dir * p.stretch * PULL_VIS;
+    p.releasing = false;
+    p.lastPushAt = performance.now();
+    this.pullLoop();
+    this.renderPull();
+  }
+
+  // Усилие сняли — пружина возвращает лист на место.
+  releasePull() {
+    const p = this.pull;
+    if (!p.dir || p.releasing) return;
+    p.releasing = true;
+    p.vel = 0;
+    p.raw = 0;
+    p.stretch = 0;
+    this.pullLoop();
+  }
+
+  resetPull() {
+    const p = this.pull;
+    if (p.raf) { cancelAnimationFrame(p.raf); p.raf = null; }
+    p.dir = 0; p.raw = 0; p.stretch = 0; p.charge = 0;
+    p.offset = 0; p.vel = 0; p.releasing = false; p.entering = false;
+    this.renderPull();
+  }
+
+  // Один цикл на весь жест: и натяжение, и возврат, и влёт нового листа.
+  pullLoop() {
+    const p = this.pull;
+    if (p.raf || p.inTick) return;
+    p.lastTickAt = performance.now();
+    const step = () => {
+      p.raf = null;
+      p.inTick = true;
+      const alive = this.pullStep();
+      p.inTick = false;
+      if (alive) p.raf = requestAnimationFrame(step);
+    };
+    p.raf = requestAnimationFrame(step);
+  }
+
+  pullStep() {
+    const p = this.pull;
+    const now = performance.now();
+    const dt = Math.min(64, Math.max(1, now - p.lastTickAt));
+    p.lastTickAt = now;
+
+    // Палец, лежащий на экране, держит растяжение сам и новых событий не шлёт —
+    // по таймеру бездействия отпускаем резинку только у колеса.
+    if (!p.releasing && this.panPid === null && now - p.lastPushAt > PULL_IDLE) this.releasePull();
+
+    if (p.releasing) {
+      // Пружина: лист садится на место с лёгким перелётом, как отпущенная бумага.
+      const t = dt / 1000;
+      p.vel += (-PULL_K * p.offset - PULL_C * p.vel) * t;
+      p.offset += p.vel * t;
+      p.charge = Math.max(0, p.charge - dt / 160);
+      if (Math.abs(p.offset) < 0.4 && Math.abs(p.vel) < 6) {
+        this.resetPull();
+        return false;
+      }
+    } else {
+      // Заряд копится, только пока резинка растянута до порога усилия.
+      p.charge = p.stretch >= PULL_ARM
+        ? Math.min(1, p.charge + dt / PULL_HOLD)
+        : Math.max(0, p.charge - dt / (PULL_HOLD * 0.6));
+      if (p.charge >= 1) this.commitPull();
+    }
+
+    this.renderPull();
+    return true;
+  }
+
+  // Усилие удержали — переходим. Тот же цикл доигрывает влёт нового листа.
+  commitPull() {
+    const p = this.pull;
+    const dir = p.dir;
+    const target = this.pullTarget(dir);
+
+    p.dir = 0; p.raw = 0; p.stretch = 0; p.charge = 0;
+    p.releasing = true;
+    p.vel = 0;
+    p.cooldownUntil = performance.now() + PULL_COOL;
+
+    // Жест сделал своё дело: палец, который ещё лежит на экране, больше не
+    // панорамирует — иначе он утянул бы камеру нового листа в старые координаты.
+    if (this.panPid !== null) { this.panVel = 0; this.endPan(); }
+
+    if (!target) return;
+    if (target.index < 0) this.addPage();
+    else this.goToPage(target.index, dir);
+
+    // Новый лист влетает с той стороны, куда шло движение, и садится на место
+    // той же пружиной, что возвращает резинку.
+    p.offset = dir * PULL_ENTRY;
+    p.vel = 0;
+    p.releasing = true;
+    p.entering = true;
+  }
+
+  renderPull() {
+    const p = this.pull;
+    const active = Math.abs(p.offset) > 0.05;
+    const mag = Math.min(1, Math.abs(p.offset) / (PULL_ARM * PULL_VIS));
+
+    this.stage.style.setProperty('--pull', p.offset.toFixed(2) + 'px');
+    this.stage.classList.toggle('pulling', active);
+
+    // Край листа: снизу — граница страницы, сверху — её начало. Позиция даётся
+    // без учёта смещения: --pull уезжает вместе с холстом по тому же правилу.
+    if (this.pullEdge) {
+      const show = active && p.dir !== 0;
+      if (show) {
+        const k = this.renderer.scale;
+        const edgeY = p.dir > 0
+          ? (PAGE_H - this.storage.cameraY) * k
+          : -this.storage.cameraY * k;
+        this.pullEdge.style.top = edgeY.toFixed(1) + 'px';
+        this.pullEdge.style.opacity = (mag * 0.9).toFixed(3);
+      } else if (this.pullEdge.style.opacity !== '') {
+        this.pullEdge.style.opacity = '';
+      }
+    }
+
+    const hint = this.pullHint;
+    if (!hint) return;
+    if (!p.entering && p.dir !== 0 && mag > 0.02) {
+      const target = this.pullTarget(p.dir);
+      hint.classList.toggle('top', p.dir < 0);
+      hint.classList.toggle('create', !!target && target.index < 0);
+      if (target && target.label !== this._pullLabel) {
+        this._pullLabel = target.label;
+        if (this.pullLabel) this.pullLabel.textContent = target.label;
+      }
+      hint.style.opacity = Math.min(1, mag * 1.25).toFixed(3);
+      hint.style.transform = `translate(-50%, ${((p.dir > 0 ? 1 : -1) * (1 - mag) * 16).toFixed(1)}px)`;
+      if (this.pullRing) this.pullRing.style.strokeDashoffset = (RING_LEN * (1 - p.charge)).toFixed(2);
+    } else if (hint.style.opacity !== '') {
+      hint.style.opacity = '';
+      hint.style.transform = '';
+    }
+  }
+
   // --- Scrollbar Handling (вертикальный) ---
 
   showScrollbar() {
@@ -691,7 +954,11 @@ export class ToolManager {
     if (!show) { this.hideEraserCursor(); return; }
     if (!this.eraserCursor) return;
 
-    const { sx, sy } = this.pointerPos(e);
+    // Кольцо лежит в координатах stage, а холст во время жеста продолжения
+    // смещён — считаем от самого stage, иначе ринг уедет от курсора.
+    const r = this.stage.getBoundingClientRect();
+    const sx = e.clientX - r.left;
+    const sy = e.clientY - r.top;
     const worldSize = SIZE_PRESETS.eraser[this.storage.sizeIdx.eraser];
     const d = Math.max(6, worldSize * this.renderer.scale);   // диаметр в экранных px
     const c = this.eraserCursor;
@@ -1171,7 +1438,7 @@ export class ToolManager {
     const cur = this.storage.currentPageId;
     const strokes = this.storage.strokes.filter(s => s.page === cur);
     const images = this.storage.images.filter(im => im.page === cur);
-    if (!strokes.length && !images.length) return;
+    if (!strokes.length && !images.length) return false;
 
     const items = [];
     for (const s of strokes) {
@@ -1191,6 +1458,7 @@ export class ToolManager {
     this.renderer.fullRender();
 
     this.history.push({ type: 'batch_delete', items });
+    return true;
   }
 
   // --- Страницы (блокнот) ---
@@ -1204,15 +1472,29 @@ export class ToolManager {
     const del = document.getElementById('delPageBtn');
     if (prev) prev.disabled = idx <= 0;
     if (next) next.disabled = idx >= total - 1;
-    if (del) del.disabled = total <= 1;
+    // Корзина активна всегда: на единственном листе она его очищает.
+    if (del) {
+      const label = total <= 1 ? 'Очистить страницу' : 'Удалить страницу';
+      del.title = label;
+      del.setAttribute('aria-label', label);
+    }
     const pagebar = document.getElementById('pagebar');
     if (pagebar) pagebar.setAttribute('aria-label', `Страницы: ${idx + 1} из ${total}`);
   }
 
   // Сброс локального состояния при смене листа (общий для навигации/добавления/удаления).
-  enterPage(pageId) {
+  //
+  // Позиция просмотра запоминается для каждого листа: возврат приводит туда же,
+  // где пользователь остановился, а не в начало страницы. remember: false — для
+  // удаления, где currentPageId уже переставлен на соседний лист и запоминать
+  // положение камеры (оно от удалённого листа) нельзя.
+  enterPage(pageId, opts = {}) {
+    if (opts.remember !== false && this.storage.currentPageId !== pageId) {
+      this.storage.rememberScroll(this.storage.currentPageId, this.storage.cameraY);
+    }
+    this.resetPull();
     this.storage.currentPageId = pageId;
-    this.storage.cameraY = 0;
+    this.storage.cameraY = this.storage.recallScroll(pageId);
     this.storage.selected = null;
     this.storage.selection = null;
     this.renderer.lassoPath = null;
@@ -1246,20 +1528,20 @@ export class ToolManager {
     this.network.showToast(`Добавлена страница ${this.storage.currentPageIndex() + 1} из ${this.storage.pages.length}`);
   }
 
+  // Удаление без переспроса: корзина срабатывает сразу. Единственный лист в
+  // блокноте не удаляется — он очищается (и это обратимо через undo).
   deleteCurrentPage() {
     if (this.storage.pages.length <= 1) {
-      this.network.showToast('Нельзя удалить единственную страницу');
+      const cleared = this.clearBoard();
+      this.network.showToast(cleared ? 'Страница очищена' : 'Страница уже пуста');
       return;
     }
-    const id = this.storage.currentPageId;
-    const hasContent = this.storage.strokes.some(s => s.page === id)
-      || this.storage.images.some(im => im.page === id);
-    if (hasContent && !window.confirm('Удалить эту страницу вместе со всем её содержимым?')) return;
 
+    const id = this.storage.currentPageId;
     this.network.send({ type: 'deletePage', payload: { pageId: id } });
     const removed = this.storage.removePage(id);   // сам выберет соседнюю страницу
     if (!removed) return;
-    this.enterPage(this.storage.currentPageId);
+    this.enterPage(this.storage.currentPageId, { remember: false });
     this.animatePageSwitch(-1);
     this.network.showToast(`Страница удалена · осталось ${this.storage.pages.length}`);
   }
