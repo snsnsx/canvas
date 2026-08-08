@@ -6,11 +6,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>onCanvas</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
-<link rel="alternate icon" href="/favicon.ico">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=3" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=3" sizes="16x16" type="image/png">
+<link rel="alternate icon" href="/favicon.ico?v=3">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
 <meta name="theme-color" content="#ffffff">
 <!-- GSAP (локально) — плавные переходы между страницами. Классический скрипт
      грузится до отложенного модуля, поэтому window.gsap доступен в tools.js. -->
@@ -34,6 +34,25 @@
     --ui-strong: #151515;
     --radius: 8px;
     --control: 32px;
+
+    /* Шкала отступов тулбаров.
+       Считаем расстояния между «чернилами» — видимыми глифами, а не между
+       боксами кнопок: тап-цель у всех одна (--control), а глиф внутри разный
+       (точка пера 18px, скос маркера 12px, иконка 21px, залитая пилюля — во
+       всю ширину). Один и тот же gap давал бы на вид разные зазоры, поэтому
+       отступы корректируются на «воздух» внутри тап-цели — --tb-slack-*.
+       Три ступени, каждая заметно крупнее предыдущей:
+         сосед по набору ~15px → соседний набор ~22px → соседняя группа 28px. */
+    --tb-pad: 6px;      /* внутренний отступ корпуса панели */
+    --tb-item: 2px;     /* зазор между тап-целями внутри набора */
+    --tb-set: 7px;      /* добавка на границе наборов внутри одной группы */
+    --tb-group: 14px;   /* от разделителя до глифа — поровну с обеих сторон */
+    /* Отступ от корпуса до глифа равен вертикальному: панель обтекает кнопки
+       одинаково со всех сторон. */
+    --tb-edge: calc(var(--tb-pad) + var(--tb-slack-dot));
+    --tb-slack-dot: calc((var(--control) - 18px) / 2);      /* точка пера / размер */
+    --tb-slack-icon: calc((var(--control) - 21px) / 2);     /* иконка */
+
     /* Запас сверху: холст начинается ниже панели инструментов, чтобы toolbar
        не перекрывал то, что можно нарисовать у верхнего края. */
     --top-reserve: calc(max(18px, env(safe-area-inset-top)) + var(--control) + 18px);
@@ -129,8 +148,10 @@
     max-width: calc(100vw - 24px);
     display: flex;
     align-items: stretch;
-    gap: 4px;
-    padding: 6px;
+    /* Весь горизонтальный воздух между группами живёт в padding самих групп —
+       так разделитель оказывается ровно посередине зазора. */
+    gap: 0;
+    padding: var(--tb-pad);
     border: 1px solid var(--line);
     border-radius: 20px;
     background: var(--panel);
@@ -147,17 +168,40 @@
   }
 
   .group {
+    /* Чем заполнены края группы — от этого зависит, сколько «воздуха» кнопка
+       приносит с собой и сколько отступа нужно добавить. Края считаются
+       отдельно: слева у группы может стоять иконка, а справа — точка. */
+    --tb-slack: var(--tb-slack-icon);
+    --tb-slack-end: var(--tb-slack);
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--tb-item);
     min-width: max-content;
-    padding: 0 5px;
+    padding-inline-start: calc(var(--tb-group) - var(--tb-slack));
+    padding-inline-end: calc(var(--tb-group) - var(--tb-slack-end));
     border-right: 1px solid var(--line);
   }
 
+  .group.colors { --tb-slack: var(--tb-slack-dot); }
+  .group.tools { --tb-slack-end: var(--tb-slack-dot); }  /* справа — «размеры» */
+  .group.status { --tb-slack: 0px; }
+
+  /* Крайние группы прижимаются к корпусу панели, а не к соседу, поэтому у них
+     внешний отступ считается от --tb-edge, а не от --tb-group. */
+  .group:first-child {
+    padding-inline-start: max(0px, calc(var(--tb-edge) - var(--tb-pad) - var(--tb-slack)));
+  }
+
   .group:last-child {
+    padding-inline-end: max(0px, calc(var(--tb-edge) - var(--tb-pad) - var(--tb-slack-end)));
     border-right: 0;
-    padding-right: 2px;
+  }
+
+  /* Начало нового набора внутри группы: ступень заметнее, чем между соседями,
+     но мельче, чем через разделитель. Ею же отодвигаются разрушающие действия
+     (очистить страницу, удалить страницу) — чтобы не попасть в них промахом. */
+  .set-start {
+    margin-inline-start: var(--tb-set);
   }
 
   .group-label {
@@ -177,7 +221,7 @@
   .segmented {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: var(--tb-item);
   }
 
   .btn,
@@ -217,6 +261,27 @@
     overflow: visible;
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
     transition: transform 140ms ease, filter 140ms ease;
+  }
+
+  #eraserBtn .m-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  #eraserBtn,
+  #lassoBtn {
+    position: relative;
+  }
+
+  #eraserBtn .tool-index,
+  #lassoBtn .tool-index {
+    position: absolute;
+    bottom: 1px;
+    right: 2px;
+    color: var(--text);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
   }
 
   .btn.icon:hover .m-icon,
@@ -275,19 +340,32 @@
     padding: 0;
   }
 
+  .size {
+    border-radius: 8px;
+  }
+
   .swatch .dot {
     width: 18px;
     height: 18px;
-    border-radius: 50%;
+    border-radius: 7px;
     border: 1px solid rgba(0, 0, 0, 0.16);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
     transition: box-shadow 120ms ease, transform 120ms ease;
   }
 
+  /* Скос маркера узкий — 12px против 18px у точки пера. При одинаковых боксах
+     пара «жёлтый/фиолетовый» разъехалась бы на вид сильнее, чем расходятся
+     целые группы, поэтому лишние 6px «воздуха» срезаны с бокса: оптический
+     зазор внутри набора получается тот же, что у пера. Высота тап-цели —
+     а с ней и удобство попадания сверху пером — не меняется. */
+  .swatch.hl {
+    width: calc(var(--control) - 6px);
+  }
+
   .swatch.hl .dot {
-    width: 20px;
-    height: 12px;
-    border-radius: 999px;
+    width: 25px;
+    height: 20px;
+    border-radius: 6px;
   }
 
   .swatch:hover .dot {
@@ -303,10 +381,27 @@
   }
 
   .size .pip {
-    display: block;
-    border-radius: 50%;
+    position: relative;
+    width: 18px;
+    height: 18px;
+    display: inline-block;
+    border-radius: 7px;
     background: var(--text);
+    color: var(--panel-solid);
     transition: box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .size .pip sub {
+    position: absolute;
+    z-index: 1;
+    right: -3px;
+    bottom: -3px;
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    -webkit-text-stroke: 1px var(--panel-solid);
+    filter: drop-shadow(0 0 1px rgba(21, 21, 21, 0.9));
   }
 
   .size:hover .pip {
@@ -316,10 +411,6 @@
   .size.sel .pip {
     box-shadow:
       0 0 0 4px var(--accent-line);
-  }
-
-  .status {
-    gap: 8px;
   }
 
   .presence {
@@ -456,8 +547,8 @@
     max-width: calc(100vw - 24px);
     display: flex;
     align-items: stretch;
-    gap: 4px;
-    padding: 6px;
+    gap: 0;
+    padding: var(--tb-pad);
     border: 1px solid var(--line);
     border-radius: 20px;
     background: var(--panel);
@@ -467,6 +558,9 @@
   }
 
   .page-indicator {
+    /* Счётчик залит фоном во всю ширину — «воздуха» внутри бокса у него нет,
+       поэтому зазор до стрелок добирается собственным полем. */
+    margin-inline: calc(var(--tb-item) + var(--tb-slack-icon));
     min-width: 44px;
     min-height: var(--control);
     display: inline-flex;
@@ -582,10 +676,24 @@
     to { transform: scale(1); }
   }
 
+  /* Тулбар и блокнот делят верхнюю строку, и оба имеют фиксированную ширину.
+     Порог — момент, когда они перестают помещаться рядом: дальше блокнот
+     уезжает вниз-влево, иначе он наезжает на цвета пера. */
+  @media (max-width: 920px) {
+    .pagebar {
+      top: auto;
+      bottom: max(12px, env(safe-area-inset-bottom));
+    }
+  }
+
   @media (max-width: 760px) {
     :root {
       --control: 31px;
       --top-reserve: calc(max(8px, env(safe-area-inset-top)) + var(--control) + 16px);
+      /* Ступени поджимаются, но их порядок сохраняется: сосед < набор < группа. */
+      --tb-pad: 5px;
+      --tb-set: 6px;
+      --tb-group: 12px;
     }
 
     .toolbar {
@@ -593,12 +701,6 @@
       right: max(8px, env(safe-area-inset-right));
       width: max-content;
       max-width: calc(100vw - 16px);
-      padding: 5px;
-      gap: 3px;
-    }
-
-    .group {
-      padding: 0 4px;
     }
 
     .btn {
@@ -617,8 +719,6 @@
       top: auto;
       left: max(8px, env(safe-area-inset-left));
       bottom: max(8px, env(safe-area-inset-bottom));
-      padding: 5px;
-      gap: 3px;
     }
 
     /* Индикатор не должен налезать ни на toolbar сверху, ни на панель страниц снизу. */
@@ -646,42 +746,43 @@
   </section>
 
   <header class="toolbar" aria-label="Инструменты доски">
-    <div class="group" aria-label="Цвета ручки">
+    <div class="group colors" aria-label="Цвета ручки">
       <span class="group-label">Перо</span>
       <div id="penColors" class="swatches"></div>
     </div>
 
-    <div class="group" aria-label="Цвета маркера">
+    <div class="group colors" aria-label="Цвета маркера">
       <span class="group-label">Маркер</span>
       <div id="hlColors" class="swatches"></div>
     </div>
 
-    <div class="group" aria-label="Инструменты">
+    <div class="group tools" aria-label="Инструменты">
       <button id="lassoBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Лассо" title="Лассо (L)">
         <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M18.2 16.7c2.3-1.5 3-4.1 1.5-6.5C17.8 7 12.4 5.4 8.1 6.4 3.8 7.4 2.2 11 4.8 13.7c2.4 2.6 7.3 3.5 11.2 2.1" fill="none" stroke="#10A37F" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="2.5 2.5"/>
-          <path d="M17.1 15.2c.7 1.4.8 2.8.1 3.8-.6.9-1.8 1.1-2.6.4-.7-.6-.7-1.7-.1-2.3.7-.8 1.7-1.2 2.6-1.9Z" fill="#D0BCFF" class="m-edge"/>
+          <rect x="4" y="6" width="16" height="12" rx="2.5" fill="none" stroke="#10A37F" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 2"/>
         </svg>
+        <sup class="tool-index" aria-hidden="true">L</sup>
       </button>
       <button id="eraserBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Ластик" title="Ластик (E)">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="i-eraser-body" x1="5" y1="4" x2="19" y2="20" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#FFD6E7"/>
-              <stop offset="0.52" stop-color="#FF8AB8"/>
-              <stop offset="1" stop-color="#D0BCFF"/>
-            </linearGradient>
-            <linearGradient id="i-eraser-cap" x1="9" y1="14" x2="18" y2="21" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#E6FFFA"/>
-              <stop offset="1" stop-color="#80CBC4"/>
-            </linearGradient>
-          </defs>
-          <path d="M6.3 12.5 12.5 6.3c.7-.7 1.9-.7 2.6 0l3.1 3.1c.7.7.7 1.9 0 2.6l-6.2 6.2c-.7.7-1.9.7-2.6 0l-3.1-3.1c-.7-.7-.7-1.9 0-2.6Z" fill="url(#i-eraser-body)" class="m-edge"/>
-          <path d="m11.4 17 4.8-4.8 2 2c.7.7.7 1.8 0 2.5L16 18.9H9.4l2-1.9Z" fill="url(#i-eraser-cap)" class="m-edge"/>
-          <path d="M8.2 12.5 13 7.7c.4-.4 1-.4 1.4 0" fill="none" stroke="rgba(255,255,255,.72)" stroke-width="1.35" stroke-linecap="round"/>
+        <svg class="m-icon" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+          <rect data-dc-tpl="8" x="9" y="25" width="102" height="70" rx="11" fill="#C9A87C"/>
+          <rect data-dc-tpl="9" x="12" y="28" width="96" height="64" rx="8.5" fill="#EBD6B2"/>
+          <g data-dc-tpl="10" transform="translate(19.9,14.7) scale(0.697)" fill="#1B3A6B">
+            <path data-dc-tpl="11" d="M97 52 C106 58 107 70 103 79" fill="none" stroke="#1B3A6B" stroke-width="4" stroke-linecap="round"/>
+            <ellipse data-dc-tpl="12" cx="69" cy="60" rx="32" ry="24"/>
+            <rect data-dc-tpl="13" x="40" y="70" width="15" height="28" rx="7"/>
+            <rect data-dc-tpl="14" x="63" y="70" width="12" height="25" rx="6"/>
+            <rect data-dc-tpl="15" x="85" y="70" width="15" height="28" rx="7"/>
+            <circle data-dc-tpl="16" cx="38" cy="56" r="21"/>
+            <path data-dc-tpl="17" d="M30 42 C16 48 8 64 10 80 C11 89 15 95 21 95 C26 95 28 91 26 88 C24 85 21 86 20 82 C17 71 24 58 36 54 Z"/>
+            <path data-dc-tpl="18" d="M40 36 C54 32 64 40 62 52 C60 63 50 68 44 62 C39 57 36 42 40 36 Z"/>
+            <path data-dc-tpl="19" d="M26 68 C20 70 16 75 15 80" fill="none" stroke="#EBD6B2" stroke-width="5" stroke-linecap="round"/>
+            <circle data-dc-tpl="20" cx="27" cy="51" r="3" fill="#EBD6B2"/>
+          </g>
         </svg>
+        <sup class="tool-index" aria-hidden="true">E</sup>
       </button>
-      <div id="sizes" class="sizes" aria-label="Толщина линии"></div>
+      <div id="sizes" class="sizes set-start" aria-label="Толщина линии"></div>
     </div>
 
     <div class="group" aria-label="Файлы">
@@ -752,7 +853,7 @@
           <path d="M16.8 11.1h-5.3" stroke="rgba(255,255,255,.7)" stroke-width="1.15" stroke-linecap="round"/>
         </svg>
       </button>
-      <button id="clearBtn" class="btn icon danger" type="button" aria-label="Очистить страницу" title="Очистить страницу">
+      <button id="clearBtn" class="btn icon danger set-start" type="button" aria-label="Очистить страницу" title="Очистить страницу">
         <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <defs>
             <linearGradient id="i-clear-bin" x1="7" y1="5" x2="17" y2="20" gradientUnits="userSpaceOnUse">
@@ -805,7 +906,7 @@
           <path d="M16.4 14.1v4.6M14.1 16.4h4.6" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
         </svg>
       </button>
-      <button id="delPageBtn" class="btn icon" type="button" aria-label="Удалить страницу" title="Удалить страницу">
+      <button id="delPageBtn" class="btn icon set-start" type="button" aria-label="Удалить страницу" title="Удалить страницу">
         <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <defs><linearGradient id="i-page-del" x1="6" y1="3" x2="18" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#FFF1F0"/><stop offset="1" stop-color="#FFCDCB"/></linearGradient></defs>
           <path d="M7.4 3.5h5.6L17.6 8v11.5a1 1 0 0 1-1 1H7.4a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="url(#i-page-del)" class="m-edge"/>
@@ -856,6 +957,8 @@ import { ToolManager } from './tools.js';
   network.onRemoteCursor = (clientId, point) => renderer.setRemoteCursor(clientId, point);
   const history = new HistoryManager(storage, network, () => renderer.scheduleRender());
   const tools = new ToolManager(storage, renderer, network, history);
+  // Участник ушёл на другой лист и начал там писать — уводим за ним остальных.
+  network.onRemotePage = (pageId, point) => tools.followRemotePage(pageId, point);
   document.getElementById('presenceBtn')?.addEventListener('click', () => window.location.reload());
 
   network.init();

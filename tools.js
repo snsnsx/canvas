@@ -274,20 +274,23 @@ export class ToolManager {
     const wrap = document.getElementById('sizes');
     if (!wrap) return;
     wrap.innerHTML = '';
-    [6, 10, 15].forEach((px, i) => {
+    [
+      { presetIndex: 1, label: '1', title: 'Размер 1 — средний', ariaLabel: 'Размер 1: средняя толщина' },
+      { presetIndex: 2, label: '2', title: 'Размер 2 — большой', ariaLabel: 'Размер 2: большая толщина' }
+    ].forEach(({ presetIndex, label, title, ariaLabel }) => {
       const b = document.createElement('button');
       b.className = 'size';
-      b.dataset.i = i;
-      b.title = ['Тонко', 'Средне', 'Толсто'][i];
-      b.setAttribute('aria-label', `Толщина: ${['тонко', 'средне', 'толсто'][i]}`);
+      b.dataset.i = presetIndex;
+      b.title = title;
+      b.setAttribute('aria-label', ariaLabel);
       b.setAttribute('aria-pressed', 'false');
-      b.innerHTML = `<span class="pip" style="width:${px}px;height:${px}px"></span>`;
+      b.innerHTML = `<span class="pip" aria-hidden="true"><sub>${label}</sub></span>`;
       b.addEventListener('click', () => {
         const t = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
         if (this.storage.tool === 'select' || this.storage.tool === 'lasso') {
           this.storage.tool = 'pen';
         }
-        this.storage.sizeIdx[t] = i;
+        this.storage.sizeIdx[t] = presetIndex;
         this.syncTools();
       });
       wrap.appendChild(b);
@@ -326,8 +329,8 @@ export class ToolManager {
     }
 
     const st = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
-    document.querySelectorAll('#sizes .size').forEach((b, i) => {
-      const selected = i === this.storage.sizeIdx[st];
+    document.querySelectorAll('#sizes .size').forEach(b => {
+      const selected = Number(b.dataset.i) === this.storage.sizeIdx[st];
       b.classList.toggle('sel', selected);
       b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
@@ -1487,7 +1490,8 @@ export class ToolManager {
   // Позиция просмотра запоминается для каждого листа: возврат приводит туда же,
   // где пользователь остановился, а не в начало страницы. remember: false — для
   // удаления, где currentPageId уже переставлен на соседний лист и запоминать
-  // положение камеры (оно от удалённого листа) нельзя.
+  // положение камеры (оно от удалённого листа) нельзя. follow: true — переход
+  // не наш, а вслед за пишущим участником (см. followRemotePage).
   enterPage(pageId, opts = {}) {
     if (opts.remember !== false && this.storage.currentPageId !== pageId) {
       this.storage.rememberScroll(this.storage.currentPageId, this.storage.cameraY);
@@ -1501,10 +1505,35 @@ export class ToolManager {
     this.renderer.remoteCursors.clear();
     this.renderer.stopFocus();
     this.stopMomentum();
-    this.network.pauseAutoFocus();
+    if (opts.follow) {
+      // Перешли за участником — автопрокрутка нужна сразу, чтобы подвести
+      // камеру к его штриху на новом листе.
+      this.network.resumeAutoFocus();
+    } else {
+      // Перелистнули сами: и автопрокрутка, и автопереход молчат — участник
+      // ушёл на этот лист намеренно, и чужое перо не тащит его обратно.
+      this.network.pauseAutoFocus();
+      this.network.pausePageFollow();
+    }
     this.network.sendCursorLeave();
     this.updatePageUI();
     this.renderer.clampCamera();
+  }
+
+  // Автопереход на лист, где начал писать другой участник. Решение о переходе
+  // принимает network.followRemotePage (он же держит паузы и кулдаун) — здесь
+  // только сама смена листа и подводка камеры к чужому штриху.
+  followRemotePage(pageId, point) {
+    if (!pageId || pageId === this.storage.currentPageId) return;
+    this.storage.ensurePage(pageId);
+    const idx = this.storage.pageIndex(pageId);
+    if (idx < 0) return;
+
+    const dir = idx > this.storage.currentPageIndex() ? 1 : -1;
+    this.enterPage(pageId, { follow: true });
+    this.animatePageSwitch(dir);
+    if (point) this.renderer.focusWorldPoint(point);
+    this.network.showToast(`Участник пишет на странице ${idx + 1}`);
   }
 
   goToPage(index, dir = 0) {

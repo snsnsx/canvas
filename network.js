@@ -2,12 +2,21 @@ import { decodePoints } from './storage.js';
 
 const EPHEMERAL_TYPES = new Set(['cursorMove', 'cursorLeave']);
 
+// Автопереход на чужой лист: участник ушёл на другую страницу и начал там
+// писать — остальные переходят за ним. COOLDOWN гасит «пинг-понг», когда двое
+// одновременно пишут на разных листах. PAUSE — время, на которое собственное
+// действие (перелистнул сам, пишет сам) отключает автопереход: пока человек
+// занят своим листом, его туда-сюда не бросает.
+const PAGE_FOLLOW_COOLDOWN = 1500;
+const PAGE_FOLLOW_PAUSE = 10000;
+
 export class NetworkManager {
   constructor(storage, onMessageReceived, onRemoteFocus) {
     this.storage = storage;
     this.onMessageReceived = onMessageReceived; // callback to trigger rerender
     this.onRemoteFocus = onRemoteFocus;
     this.onRemoteCursor = null;
+    this.onRemotePage = null;
 
     this.socket = null;
     this.reconnectTimer = null;
@@ -29,6 +38,7 @@ export class NetworkManager {
     this.activeClientId = null;
     this.activeStrokeId = null;
     this.focusPausedUntil = 0;
+    this.pageFollowPausedUntil = 0;
     this.remoteWritingClients = new Set();
     this.remoteStrokeLastPoint = new Map();
     this.remoteCursorTimers = new Map();
@@ -52,6 +62,35 @@ export class NetworkManager {
 
   pauseAutoFocus(ms = 3500) {
     this.focusPausedUntil = Math.max(this.focusPausedUntil, Date.now() + ms);
+  }
+
+  // Автопереход на чужой лист сам переключает страницу, а enterPage гасит
+  // автопрокрутку — на новом листе она нужна сразу, чтобы подвести камеру
+  // к штриху. Снимать паузу безопасно: переход не начинается, пока она идёт.
+  resumeAutoFocus() {
+    this.focusPausedUntil = 0;
+  }
+
+  pausePageFollow(ms = PAGE_FOLLOW_PAUSE) {
+    this.pageFollowPausedUntil = Math.max(this.pageFollowPausedUntil, Date.now() + ms);
+  }
+
+  // Участник перешёл на другой лист и начал там писать — уводим за ним и нас.
+  // Только на начало штриха: продолжение (appendPoints) уже не утаскивает
+  // того, кто тем временем сам перелистнул страницу.
+  followRemotePage(pageId, point, clientId, strokeId) {
+    if (!this.onRemotePage || !pageId) return;
+    if (pageId === this.storage.currentPageId) return;
+    if (this.currentStrokeId) return;   // незакрытый свой штрих — лист из-под пера не уводим
+
+    const now = Date.now();
+    if (now < this.focusPausedUntil) return;        // сами рисуем или прокручиваем
+    if (now < this.pageFollowPausedUntil) return;   // сами перелистнули / только что перешли
+
+    this.pausePageFollow(PAGE_FOLLOW_COOLDOWN);
+    this.activeClientId = clientId || null;
+    this.activeStrokeId = strokeId || null;
+    this.onRemotePage(pageId, point);
   }
 
   focusRemotePoint(point, clientId, strokeId) {
@@ -254,6 +293,9 @@ export class NetworkManager {
     this.currentStrokeId = strokeId;
     this.bufferedPoints = [this.encodePoint(startPoint)];
     this.lastCursorPoint = null;
+    // Пишем сами — значит, работаем на этом листе: чужое письмо на другой
+    // странице не должно нас отсюда уводить, пока мы не отложим перо.
+    this.pausePageFollow();
 
     // Broadcast immediately the beginStroke event
     this.send({
@@ -385,9 +427,12 @@ export class NetworkManager {
         this.storage.extendBottom(stroke);
         const lastPt = pts[pts.length - 1];
         if (lastPt) this.remoteStrokeLastPoint.set(msg.client, lastPt);
-        // Автопрокрутка к чужому штриху — только если он на нашей странице.
+        // Штрих на нашей странице — подводим к нему камеру; на другой —
+        // переходим на неё вслед за участником.
         if (stroke.page === this.storage.currentPageId) {
           this.focusRemotePoint(lastPt, msg.client, payload.strokeId);
+        } else {
+          this.followRemotePage(stroke.page, lastPt, msg.client, payload.strokeId);
         }
         break;
       }
