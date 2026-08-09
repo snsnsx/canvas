@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="i-image-frame" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAF2FF"/>
+      <stop offset="1" stop-color="#A8C7FA"/>
+    </linearGradient>
+    <linearGradient id="i-image-hill" x1="7" y1="12" x2="18" y2="19" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#AEE8C8"/>
+      <stop offset="1" stop-color="#10A37F"/>
+    </linearGradient>
+  </defs>
+  <rect x="4.5" y="5" width="13.5" height="13.5" rx="3.2" fill="url(#i-image-frame)" class="m-edge"/>
+  <circle cx="8.7" cy="9.1" r="1.8" fill="#FFD966" class="m-edge"/>
+  <path d="m6.2 17 4.3-4.7 2.6 2.7 1.6-1.7 3.3 3.7H6.2Z" fill="url(#i-image-hill)"/>
+  <circle cx="17.4" cy="16.8" r="4.2" fill="#D0BCFF" class="m-edge"/>
+  <path d="M17.4 14.6V19M15.2 16.8h4.4" stroke="#4A336D" stroke-width="1.35" stroke-linecap="round"/>
+  <path d="M7 6.9h5" stroke="rgba(255,255,255,.72)" stroke-width="1.2" stroke-linecap="round"/>
+</svg>

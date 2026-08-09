@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <defs><linearGradient id="i-page-del" x1="6" y1="3" x2="18" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#FFF1F0"/><stop offset="1" stop-color="#FFCDCB"/></linearGradient></defs>
+  <path d="M7.4 3.5h5.6L17.6 8v11.5a1 1 0 0 1-1 1H7.4a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="url(#i-page-del)" class="m-edge"/>
+  <path d="M13 3.7V7.4a1 1 0 0 0 1 1h3.5" fill="none" stroke="#C0687F" stroke-width="1.15" stroke-linecap="round"/>
+  <circle cx="16.4" cy="16.4" r="4.7" fill="#BA1A1A" class="m-edge"/>
+  <path d="M14.1 16.4h4.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

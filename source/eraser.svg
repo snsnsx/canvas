@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+  <rect data-dc-tpl="8" x="9" y="25" width="102" height="70" rx="11" fill="#C9A87C"/>
+  <rect data-dc-tpl="9" x="12" y="28" width="96" height="64" rx="8.5" fill="#EBD6B2"/>
+  <g data-dc-tpl="10" transform="translate(19.9,14.7) scale(0.697)" fill="#1B3A6B">
+    <path data-dc-tpl="11" d="M97 52 C106 58 107 70 103 79" fill="none" stroke="#1B3A6B" stroke-width="4" stroke-linecap="round"/>
+    <ellipse data-dc-tpl="12" cx="69" cy="60" rx="32" ry="24"/>
+    <rect data-dc-tpl="13" x="40" y="70" width="15" height="28" rx="7"/>
+    <rect data-dc-tpl="14" x="63" y="70" width="12" height="25" rx="6"/>
+    <rect data-dc-tpl="15" x="85" y="70" width="15" height="28" rx="7"/>
+    <circle data-dc-tpl="16" cx="38" cy="56" r="21"/>
+    <path data-dc-tpl="17" d="M30 42 C16 48 8 64 10 80 C11 89 15 95 21 95 C26 95 28 91 26 88 C24 85 21 86 20 82 C17 71 24 58 36 54 Z"/>
+    <path data-dc-tpl="18" d="M40 36 C54 32 64 40 62 52 C60 63 50 68 44 62 C39 57 36 42 40 36 Z"/>
+    <path data-dc-tpl="19" d="M26 68 C20 70 16 75 15 80" fill="none" stroke="#EBD6B2" stroke-width="5" stroke-linecap="round"/>
+    <circle data-dc-tpl="20" cx="27" cy="51" r="3" fill="#EBD6B2"/>
+  </g>
+</svg>

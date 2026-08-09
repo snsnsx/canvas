@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="i-export-arrow" x1="12" y1="4" x2="12" y2="15" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B8F7D4"/>
+      <stop offset="1" stop-color="#10A37F"/>
+    </linearGradient>
+    <linearGradient id="i-export-tray" x1="5" y1="13" x2="19" y2="21" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8EAED"/>
+      <stop offset="1" stop-color="#A8C7FA"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 4.5v9.1" stroke="url(#i-export-arrow)" stroke-width="3" stroke-linecap="round"/>
+  <path d="m8.5 10.6 3.5 3.5 3.5-3.5" fill="none" stroke="#087A62" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M6 14.8v2.8c0 1 .8 1.9 1.9 1.9h8.2c1 0 1.9-.8 1.9-1.9v-2.8" fill="none" stroke="url(#i-export-tray)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M8.4 17.4h7.2" stroke="rgba(255,255,255,.72)" stroke-width="1.1" stroke-linecap="round"/>
+</svg>

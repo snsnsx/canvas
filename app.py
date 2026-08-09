@@ -17,6 +17,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 BASE = os.getcwd() # Fix: Use os.getcwd() instead of __file__ for Colab environment
 INDEX = os.path.join(BASE, "index.html")
+SOURCE = os.path.join(BASE, "source")
 BOARDS = os.path.join(BASE, "boards")
 os.makedirs(BOARDS, exist_ok=True)
 
@@ -565,9 +566,59 @@ async def _start_housekeeping():
 NO_CACHE = {"Cache-Control": "no-cache"}
 JS_HEADERS = NO_CACHE
 
+# SVG-иконки интерфейса лежат отдельными файлами в source/ и подставляются в
+# разметку на месте меток <!--icon:имя--> при отдаче страницы. Именно инлайн, а не
+# <img>/<use>: иконки красятся правилами самой страницы (.m-edge, .hint-arrow,
+# var(--ui-strong)), а кольцо подсказки tools.js достаёт через getElementById —
+# во внешнем документе ни то, ни другое не работает.
+# Собранная страница кэшируется по mtime исходников, поэтому правка любого .svg
+# подхватывается со следующим запросом и без перезапуска сервера.
+ICON_MARK = re.compile(rb"<!--icon:([a-z0-9-]+)-->")
+
+_index_cache = {"stamp": None, "html": b""}
+
+
+def _index_stamp():
+    """Отпечаток исходников страницы: mtime index.html и всех иконок."""
+    stamp = [os.path.getmtime(INDEX)]
+    try:
+        for name in sorted(os.listdir(SOURCE)):
+            if name.endswith(".svg"):
+                stamp.append((name, os.path.getmtime(os.path.join(SOURCE, name))))
+    except OSError:
+        pass
+    return tuple(stamp)
+
+
+def _render_index() -> bytes:
+    with open(INDEX, "rb") as fh:
+        html = fh.read()
+
+    def inline(match):
+        # Имя ограничено регуляркой [a-z0-9-]+, выйти из source/ через метку нельзя.
+        path = os.path.join(SOURCE, match.group(1).decode("ascii") + ".svg")
+        try:
+            with open(path, "rb") as fh:
+                return fh.read().strip()
+        except OSError:
+            # Пропавшая иконка не должна ронять страницу: оставляем метку — она
+            # видна в DOM и сразу называет недостающий файл.
+            return match.group(0)
+
+    return ICON_MARK.sub(inline, html)
+
+
+def _index_html() -> bytes:
+    stamp = _index_stamp()
+    if _index_cache["stamp"] != stamp:
+        _index_cache["html"] = _render_index()
+        _index_cache["stamp"] = stamp
+    return _index_cache["html"]
+
+
 @app.get("/")
 async def index():
-    return FileResponse(INDEX, headers=NO_CACHE)
+    return HTMLResponse(_index_html(), headers=NO_CACHE)
 
 @app.get("/storage.js")
 async def get_storage():

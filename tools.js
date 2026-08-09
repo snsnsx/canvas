@@ -275,8 +275,8 @@ export class ToolManager {
     if (!wrap) return;
     wrap.innerHTML = '';
     [
-      { presetIndex: 1, label: '1', title: 'Размер 1 — средний', ariaLabel: 'Размер 1: средняя толщина' },
-      { presetIndex: 2, label: '2', title: 'Размер 2 — большой', ariaLabel: 'Размер 2: большая толщина' }
+      { presetIndex: 1, label: 'S', title: 'Размер S — средний', ariaLabel: 'Размер S: средняя толщина' },
+      { presetIndex: 2, label: 'M', title: 'Размер M — большой', ariaLabel: 'Размер M: большая толщина' }
     ].forEach(({ presetIndex, label, title, ariaLabel }) => {
       const b = document.createElement('button');
       b.className = 'size';

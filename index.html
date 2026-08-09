@@ -47,10 +47,12 @@
     --tb-item: 2px;     /* зазор между тап-целями внутри набора */
     --tb-set: 7px;      /* добавка на границе наборов внутри одной группы */
     --tb-group: 14px;   /* от разделителя до глифа — поровну с обеих сторон */
+    --tb-pen-control: 24px; /* компактнее только ряд цветов пера */
     /* Отступ от корпуса до глифа равен вертикальному: панель обтекает кнопки
        одинаково со всех сторон. */
     --tb-edge: calc(var(--tb-pad) + var(--tb-slack-dot));
     --tb-slack-dot: calc((var(--control) - 18px) / 2);      /* точка пера / размер */
+    --tb-slack-pen: calc((var(--tb-pen-control) - 18px) / 2);
     --tb-slack-icon: calc((var(--control) - 21px) / 2);     /* иконка */
 
     /* Запас сверху: холст начинается ниже панели инструментов, чтобы toolbar
@@ -183,6 +185,7 @@
   }
 
   .group.colors { --tb-slack: var(--tb-slack-dot); }
+  .group.pen-colors { --tb-slack: var(--tb-slack-pen); }
   .group.tools { --tb-slack-end: var(--tb-slack-dot); }  /* справа — «размеры» */
   .group.status { --tb-slack: 0px; }
 
@@ -340,6 +343,12 @@
     padding: 0;
   }
 
+  /* Цвета пера собраны плотнее: видимый зазор между 18px-точками уменьшается
+     с 16 до 8px, а высота зоны нажатия остаётся общей для всего toolbar. */
+  #penColors .swatch {
+    width: var(--tb-pen-control);
+  }
+
   .size {
     border-radius: 8px;
   }
@@ -355,11 +364,11 @@
 
   /* Скос маркера узкий — 12px против 18px у точки пера. При одинаковых боксах
      пара «жёлтый/фиолетовый» разъехалась бы на вид сильнее, чем расходятся
-     целые группы, поэтому лишние 6px «воздуха» срезаны с бокса: оптический
-     зазор внутри набора получается тот же, что у пера. Высота тап-цели —
+     целые группы, поэтому лишние 4px «воздуха» срезаны с бокса: цвета остаются
+     собранными, но не слипаются. Высота тап-цели —
      а с ней и удобство попадания сверху пером — не меняется. */
   .swatch.hl {
-    width: calc(var(--control) - 6px);
+    width: calc(var(--control) - 4px);
   }
 
   .swatch.hl .dot {
@@ -394,14 +403,12 @@
   .size .pip sub {
     position: absolute;
     z-index: 1;
-    right: -3px;
-    bottom: -3px;
-    color: var(--text);
-    font-size: 11px;
-    font-weight: 800;
+    right: 2px;
+    bottom: 1px;
+    color: var(--panel-solid);
+    font-size: 10px;
+    font-weight: 700;
     line-height: 1;
-    -webkit-text-stroke: 1px var(--panel-solid);
-    filter: drop-shadow(0 0 1px rgba(21, 21, 21, 0.9));
   }
 
   .size:hover .pip {
@@ -487,10 +494,18 @@
     z-index: 11;
     width: 28px;
     height: 28px;
-    border: 1.5px solid rgba(21, 21, 21, 0.72);
+    border: 1.5px solid #a6425b;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.32);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.72);
+    background-color: #f19caf;
+    background-image:
+      radial-gradient(circle at 2px 2px, rgba(111, 35, 55, 0.30) 0 0.8px, transparent 1.1px),
+      radial-gradient(circle at 6px 5px, rgba(255, 235, 240, 0.68) 0 0.9px, transparent 1.2px),
+      radial-gradient(circle at 3px 7px, rgba(142, 48, 71, 0.22) 0 0.7px, transparent 1px);
+    background-size: 8px 8px, 9px 9px, 11px 11px;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.88),
+      inset 0 1px 2px rgba(255, 238, 242, 0.72),
+      inset 0 -1px 2px rgba(122, 38, 59, 0.24);
     opacity: 0;
     pointer-events: none;
     transform: translate(-50%, -50%);
@@ -746,7 +761,7 @@
   </section>
 
   <header class="toolbar" aria-label="Инструменты доски">
-    <div class="group colors" aria-label="Цвета ручки">
+    <div class="group colors pen-colors" aria-label="Цвета ручки">
       <span class="group-label">Перо</span>
       <div id="penColors" class="swatches"></div>
     </div>
@@ -758,28 +773,11 @@
 
     <div class="group tools" aria-label="Инструменты">
       <button id="lassoBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Лассо" title="Лассо (L)">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <rect x="4" y="6" width="16" height="12" rx="2.5" fill="none" stroke="#10A37F" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 2"/>
-        </svg>
+        <!--icon:lasso-->
         <sup class="tool-index" aria-hidden="true">L</sup>
       </button>
       <button id="eraserBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Ластик" title="Ластик (E)">
-        <svg class="m-icon" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
-          <rect data-dc-tpl="8" x="9" y="25" width="102" height="70" rx="11" fill="#C9A87C"/>
-          <rect data-dc-tpl="9" x="12" y="28" width="96" height="64" rx="8.5" fill="#EBD6B2"/>
-          <g data-dc-tpl="10" transform="translate(19.9,14.7) scale(0.697)" fill="#1B3A6B">
-            <path data-dc-tpl="11" d="M97 52 C106 58 107 70 103 79" fill="none" stroke="#1B3A6B" stroke-width="4" stroke-linecap="round"/>
-            <ellipse data-dc-tpl="12" cx="69" cy="60" rx="32" ry="24"/>
-            <rect data-dc-tpl="13" x="40" y="70" width="15" height="28" rx="7"/>
-            <rect data-dc-tpl="14" x="63" y="70" width="12" height="25" rx="6"/>
-            <rect data-dc-tpl="15" x="85" y="70" width="15" height="28" rx="7"/>
-            <circle data-dc-tpl="16" cx="38" cy="56" r="21"/>
-            <path data-dc-tpl="17" d="M30 42 C16 48 8 64 10 80 C11 89 15 95 21 95 C26 95 28 91 26 88 C24 85 21 86 20 82 C17 71 24 58 36 54 Z"/>
-            <path data-dc-tpl="18" d="M40 36 C54 32 64 40 62 52 C60 63 50 68 44 62 C39 57 36 42 40 36 Z"/>
-            <path data-dc-tpl="19" d="M26 68 C20 70 16 75 15 80" fill="none" stroke="#EBD6B2" stroke-width="5" stroke-linecap="round"/>
-            <circle data-dc-tpl="20" cx="27" cy="51" r="3" fill="#EBD6B2"/>
-          </g>
-        </svg>
+        <!--icon:eraser-->
         <sup class="tool-index" aria-hidden="true">E</sup>
       </button>
       <div id="sizes" class="sizes set-start" aria-label="Толщина линии"></div>
@@ -787,86 +785,22 @@
 
     <div class="group" aria-label="Файлы">
       <button id="imgBtn" class="btn icon" type="button" aria-label="Добавить изображение" title="Добавить изображение">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="i-image-frame" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#EAF2FF"/>
-              <stop offset="1" stop-color="#A8C7FA"/>
-            </linearGradient>
-            <linearGradient id="i-image-hill" x1="7" y1="12" x2="18" y2="19" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#AEE8C8"/>
-              <stop offset="1" stop-color="#10A37F"/>
-            </linearGradient>
-          </defs>
-          <rect x="4.5" y="5" width="13.5" height="13.5" rx="3.2" fill="url(#i-image-frame)" class="m-edge"/>
-          <circle cx="8.7" cy="9.1" r="1.8" fill="#FFD966" class="m-edge"/>
-          <path d="m6.2 17 4.3-4.7 2.6 2.7 1.6-1.7 3.3 3.7H6.2Z" fill="url(#i-image-hill)"/>
-          <circle cx="17.4" cy="16.8" r="4.2" fill="#D0BCFF" class="m-edge"/>
-          <path d="M17.4 14.6V19M15.2 16.8h4.4" stroke="#4A336D" stroke-width="1.35" stroke-linecap="round"/>
-          <path d="M7 6.9h5" stroke="rgba(255,255,255,.72)" stroke-width="1.2" stroke-linecap="round"/>
-        </svg>
+        <!--icon:image-->
       </button>
       <button id="exportBtn" class="btn icon" type="button" aria-label="Скачать PDF (все страницы)" title="Скачать PDF (все страницы)">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="i-export-arrow" x1="12" y1="4" x2="12" y2="15" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#B8F7D4"/>
-              <stop offset="1" stop-color="#10A37F"/>
-            </linearGradient>
-            <linearGradient id="i-export-tray" x1="5" y1="13" x2="19" y2="21" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#E8EAED"/>
-              <stop offset="1" stop-color="#A8C7FA"/>
-            </linearGradient>
-          </defs>
-          <path d="M12 4.5v9.1" stroke="url(#i-export-arrow)" stroke-width="3" stroke-linecap="round"/>
-          <path d="m8.5 10.6 3.5 3.5 3.5-3.5" fill="none" stroke="#087A62" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M6 14.8v2.8c0 1 .8 1.9 1.9 1.9h8.2c1 0 1.9-.8 1.9-1.9v-2.8" fill="none" stroke="url(#i-export-tray)" stroke-width="3" stroke-linecap="round"/>
-          <path d="M8.4 17.4h7.2" stroke="rgba(255,255,255,.72)" stroke-width="1.1" stroke-linecap="round"/>
-        </svg>
+        <!--icon:export-->
       </button>
     </div>
 
     <div class="group" aria-label="История">
       <button id="undoBtn" class="btn icon" type="button" title="Отменить (Ctrl/Cmd+Z)" disabled aria-label="Отменить">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="i-undo" x1="5" y1="7" x2="19" y2="18" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#D0BCFF"/>
-              <stop offset="1" stop-color="#6750A4"/>
-            </linearGradient>
-          </defs>
-          <path d="M9.5 8.2 5.6 12l3.9 3.8" fill="none" stroke="url(#i-undo)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M6.4 12h6.8c3.1 0 5.1 1.9 5.1 4.5" fill="none" stroke="#6750A4" stroke-width="2.4" stroke-linecap="round"/>
-          <path d="M7.2 11.1h5.3" stroke="rgba(255,255,255,.7)" stroke-width="1.15" stroke-linecap="round"/>
-        </svg>
+        <!--icon:undo-->
       </button>
       <button id="redoBtn" class="btn icon" type="button" title="Повторить (Ctrl/Cmd+Y)" disabled aria-label="Повторить">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="i-redo" x1="19" y1="7" x2="5" y2="18" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#A8C7FA"/>
-              <stop offset="1" stop-color="#0B57D0"/>
-            </linearGradient>
-          </defs>
-          <path d="m14.5 8.2 3.9 3.8-3.9 3.8" fill="none" stroke="url(#i-redo)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M17.6 12h-6.8c-3.1 0-5.1 1.9-5.1 4.5" fill="none" stroke="#0B57D0" stroke-width="2.4" stroke-linecap="round"/>
-          <path d="M16.8 11.1h-5.3" stroke="rgba(255,255,255,.7)" stroke-width="1.15" stroke-linecap="round"/>
-        </svg>
+        <!--icon:redo-->
       </button>
       <button id="clearBtn" class="btn icon danger set-start" type="button" aria-label="Очистить страницу" title="Очистить страницу">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="i-clear-bin" x1="7" y1="5" x2="17" y2="20" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#FFDAD6"/>
-              <stop offset=".55" stop-color="#FF8A80"/>
-              <stop offset="1" stop-color="#BA1A1A"/>
-            </linearGradient>
-          </defs>
-          <path d="M8 8.5h8l-.6 9.4c-.1 1-1 1.8-2 1.8h-2.8c-1 0-1.9-.8-2-1.8L8 8.5Z" fill="url(#i-clear-bin)" class="m-edge"/>
-          <path d="M7 7.2h10M10 7.2l.5-1.5h3l.5 1.5" fill="none" stroke="#7D1B1B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M10.2 11.1v5.1M13.8 11.1v5.1" stroke="rgba(125,27,27,.62)" stroke-width="1.25" stroke-linecap="round"/>
-          <path d="M9.8 9.5h4.8" stroke="rgba(255,255,255,.65)" stroke-width="1.1" stroke-linecap="round"/>
-        </svg>
+        <!--icon:clear-->
       </button>
     </div>
 
@@ -882,51 +816,26 @@
   <nav id="pagebar" class="pagebar" aria-label="Страницы">
     <div class="group" aria-label="Навигация по страницам">
       <button id="prevPageBtn" class="btn icon" type="button" aria-label="Предыдущая страница" title="Предыдущая страница ([)">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs><linearGradient id="i-page-prev" x1="6" y1="6" x2="15" y2="18" gradientUnits="userSpaceOnUse"><stop stop-color="#A8C7FA"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
-          <path d="M14.5 5.8 8.6 12l5.9 6.2" fill="none" stroke="url(#i-page-prev)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <!--icon:page-prev-->
       </button>
       <span id="pageIndicator" class="page-indicator" aria-live="polite" title="Текущая страница / всего">1/1</span>
       <button id="nextPageBtn" class="btn icon" type="button" aria-label="Следующая страница" title="Следующая страница (])">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs><linearGradient id="i-page-next" x1="18" y1="6" x2="9" y2="18" gradientUnits="userSpaceOnUse"><stop stop-color="#A8C7FA"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
-          <path d="M9.5 5.8 15.4 12l-5.9 6.2" fill="none" stroke="url(#i-page-next)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <!--icon:page-next-->
       </button>
     </div>
 
     <div class="group" aria-label="Управление страницами">
       <button id="addPageBtn" class="btn icon" type="button" aria-label="Добавить страницу" title="Добавить страницу">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs><linearGradient id="i-page-add" x1="6" y1="3" x2="18" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#EAF2FF"/><stop offset="1" stop-color="#A8C7FA"/></linearGradient></defs>
-          <path d="M7.4 3.5h5.6L17.6 8v11.5a1 1 0 0 1-1 1H7.4a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="url(#i-page-add)" class="m-edge"/>
-          <path d="M13 3.7V7.4a1 1 0 0 0 1 1h3.5" fill="none" stroke="#4A6DA6" stroke-width="1.15" stroke-linecap="round"/>
-          <circle cx="16.4" cy="16.4" r="4.7" fill="#10A37F" class="m-edge"/>
-          <path d="M16.4 14.1v4.6M14.1 16.4h4.6" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
-        </svg>
+        <!--icon:page-add-->
       </button>
       <button id="delPageBtn" class="btn icon set-start" type="button" aria-label="Удалить страницу" title="Удалить страницу">
-        <svg class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs><linearGradient id="i-page-del" x1="6" y1="3" x2="18" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#FFF1F0"/><stop offset="1" stop-color="#FFCDCB"/></linearGradient></defs>
-          <path d="M7.4 3.5h5.6L17.6 8v11.5a1 1 0 0 1-1 1H7.4a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="url(#i-page-del)" class="m-edge"/>
-          <path d="M13 3.7V7.4a1 1 0 0 0 1 1h3.5" fill="none" stroke="#C0687F" stroke-width="1.15" stroke-linecap="round"/>
-          <circle cx="16.4" cy="16.4" r="4.7" fill="#BA1A1A" class="m-edge"/>
-          <path d="M14.1 16.4h4.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
+        <!--icon:page-del-->
       </button>
     </div>
   </nav>
 
   <div id="pageHint" class="page-hint" aria-hidden="true">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <defs><linearGradient id="i-hint" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse"><stop stop-color="#3ED2A7"/><stop offset="1" stop-color="#10A37F"/></linearGradient></defs>
-      <circle cx="12" cy="12" r="9.4" fill="none" stroke="rgba(21, 21, 21, 0.10)" stroke-width="2.4"/>
-      <circle id="pageHintRing" cx="12" cy="12" r="9.4" fill="none" stroke="url(#i-hint)" stroke-width="2.4"
-              stroke-linecap="round" stroke-dasharray="59.06" stroke-dashoffset="59.06" transform="rotate(-90 12 12)"/>
-      <path class="hint-arrow" d="M12 8.1v7.6M8.8 12.6 12 15.8l3.2-3.2" fill="none" stroke="var(--ui-strong)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-      <path class="hint-plus" d="M12 8.3v7.4M8.3 12h7.4" fill="none" stroke="var(--ui-strong)" stroke-width="1.9" stroke-linecap="round"/>
-    </svg>
+    <!--icon:page-hint-->
     <span id="pageHintLabel" class="page-hint-label">Новая страница</span>
   </div>
 

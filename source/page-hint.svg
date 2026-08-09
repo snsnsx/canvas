@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <defs><linearGradient id="i-hint" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse"><stop stop-color="#3ED2A7"/><stop offset="1" stop-color="#10A37F"/></linearGradient></defs>
+  <circle cx="12" cy="12" r="9.4" fill="none" stroke="rgba(21, 21, 21, 0.10)" stroke-width="2.4"/>
+  <circle id="pageHintRing" cx="12" cy="12" r="9.4" fill="none" stroke="url(#i-hint)" stroke-width="2.4"
+          stroke-linecap="round" stroke-dasharray="59.06" stroke-dashoffset="59.06" transform="rotate(-90 12 12)"/>
+  <path class="hint-arrow" d="M12 8.1v7.6M8.8 12.6 12 15.8l3.2-3.2" fill="none" stroke="var(--ui-strong)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path class="hint-plus" d="M12 8.3v7.4M8.3 12h7.4" fill="none" stroke="var(--ui-strong)" stroke-width="1.9" stroke-linecap="round"/>
+</svg>
