@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
-  <rect data-dc-tpl="8" x="9" y="25" width="102" height="70" rx="11" fill="#C9A87C"/>
-  <rect data-dc-tpl="9" x="12" y="28" width="96" height="64" rx="8.5" fill="#EBD6B2"/>
+  <rect data-dc-tpl="8" x="9" y="9" width="102" height="102" rx="11" fill="#C9A87C"/>
+  <rect data-dc-tpl="9" x="12" y="12" width="96" height="96" rx="8.5" fill="#EBD6B2"/>
   <g data-dc-tpl="10" transform="translate(19.9,14.7) scale(0.697)" fill="#1B3A6B">
     <path data-dc-tpl="11" d="M97 52 C106 58 107 70 103 79" fill="none" stroke="#1B3A6B" stroke-width="4" stroke-linecap="round"/>
     <ellipse data-dc-tpl="12" cx="69" cy="60" rx="32" ry="24"/>
