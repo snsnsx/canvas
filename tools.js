@@ -53,8 +53,6 @@ export class ToolManager {
     this.lassoStart = null;
     this.lassoOriginal = null;
 
-    this.sbTimer = null;
-
     // Жест продолжения: усилие, которое не влезло в лист, тянет «резинку».
     this.pull = {
       dir: 0,            // +1 — тянем за нижний край, -1 — за верхний
@@ -131,8 +129,6 @@ export class ToolManager {
         this.releasePull();   // прокрутили обратно внутрь листа — резинка не нужна
       }
       this.renderer.scheduleCameraRender();
-      this.showScrollbar();
-      this.hideScrollbarLater();
     }, { passive: false });
 
     // Buttons
@@ -428,8 +424,6 @@ export class ToolManager {
         this.storage.cameraY -= 80 / this.renderer.scale;
         this.renderer.clampCamera();
         this.renderer.scheduleCameraRender();
-        this.showScrollbar();
-        this.hideScrollbarLater();
         break;
       case 'arrowdown':
         this.network.pauseAutoFocus();
@@ -437,8 +431,6 @@ export class ToolManager {
         this.storage.cameraY += 80 / this.renderer.scale;
         this.renderer.clampCamera();
         this.renderer.scheduleCameraRender();
-        this.showScrollbar();
-        this.hideScrollbarLater();
         break;
       case 'home':
         this.network.pauseAutoFocus();
@@ -672,7 +664,6 @@ export class ToolManager {
     this.panLastY = e.clientY;
     this.panLastT = performance.now();
     this.panVel = 0;
-    this.showScrollbar();
   }
 
   movePan(e) {
@@ -701,7 +692,6 @@ export class ToolManager {
     this.panPid = null;
     this.releasePull();
     if (Math.abs(this.panVel) > 0.02) this.startMomentum();
-    else this.hideScrollbarLater();
   }
 
   startMomentum() {
@@ -724,7 +714,6 @@ export class ToolManager {
         this.momRAF = requestAnimationFrame(step);
       } else {
         this.momRAF = null;
-        this.hideScrollbarLater();
       }
     };
     this.momRAF = requestAnimationFrame(step);
@@ -934,21 +923,6 @@ export class ToolManager {
     }
   }
 
-  // --- Scrollbar Handling (вертикальный) ---
-
-  showScrollbar() {
-    this.vbar.classList.add('show');
-    if (this.sbTimer) {
-      clearTimeout(this.sbTimer);
-      this.sbTimer = null;
-    }
-  }
-
-  hideScrollbarLater() {
-    if (this.sbTimer) clearTimeout(this.sbTimer);
-    this.sbTimer = setTimeout(() => this.vbar.classList.remove('show'), 900);
-  }
-
   // --- Eraser Cursor (кольцо, показывающее размер и положение ластика) ---
 
   updateEraserCursor(e) {
@@ -990,7 +964,6 @@ export class ToolManager {
       id = e.pointerId;
       grab = e.clientY - this.thumb.getBoundingClientRect().top;
       this.thumb.setPointerCapture(id);
-      this.showScrollbar();
     });
     this.thumb.addEventListener('pointermove', e => {
       if (e.pointerId !== id) return;
@@ -1007,7 +980,6 @@ export class ToolManager {
     this.thumb.addEventListener('pointerup', e => {
       if (e.pointerId === id) {
         id = null;
-        this.hideScrollbarLater();
       }
     });
   }
