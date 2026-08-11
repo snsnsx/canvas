@@ -1,4 +1,4 @@
-import { decodePoints } from './storage.js';
+import { decodePoints, normalizeNote, MAX_NOTE_LEN } from './storage.js';
 
 const EPHEMERAL_TYPES = new Set(['cursorMove', 'cursorLeave']);
 
@@ -247,6 +247,12 @@ export class NetworkManager {
     if (this.onRemoteCursor) this.onRemoteCursor(clientId, point);
   }
 
+  // Плавающие окна живут в DOM, а не на холсте: перерисовка канвы их не
+  // касается, поэтому об изменениях сообщаем отдельным событием.
+  notesChanged() {
+    window.dispatchEvent(new CustomEvent('notesChanged'));
+  }
+
   clearRemoteCursorDelay(clientId) {
     const timer = this.remoteCursorTimers.get(clientId);
     if (timer) clearTimeout(timer);
@@ -476,6 +482,8 @@ export class NetworkManager {
           const iIdx = this.storage.images.findIndex(im => im.id === id);
           if (iIdx >= 0) {
             this.storage.images.splice(iIdx, 1);
+          } else if (this.storage.removeNote(id)) {
+            this.notesChanged();
           }
         }
         this.storage.selection = null;
@@ -504,6 +512,13 @@ export class NetworkManager {
           } else {
             this.storage.strokes.push(strokeObj);
           }
+        } else if (data.type === 'note') {
+          const note = normalizeNote({ ...data, id }, this.storage.currentPageId);
+          this.storage.ensurePage(note.page);
+          const idx = this.storage.notes.findIndex(n => n.id === id);
+          if (idx >= 0) this.storage.notes[idx] = note;
+          else this.storage.notes.push(note);
+          this.notesChanged();
         } else if (data.type === 'image') {
           const idx = this.storage.images.findIndex(im => im.id === id);
           const img = {
@@ -561,6 +576,38 @@ export class NetworkManager {
         this.storage.extendBottom(img);
         break;
       }
+      case 'addNote': {
+        const payload = msg.payload || {};
+        const note = normalizeNote({ ...payload, id: payload.noteId }, this.storage.currentPageId);
+        this.storage.ensurePage(note.page);
+        if (!this.storage.noteById(note.id)) this.storage.notes.push(note);
+        this.notesChanged();
+        break;
+      }
+      case 'updateNote': {
+        // Геометрия окна идёт потоком при перетаскивании — обновляем по месту,
+        // чтобы не пересоздавать элемент и не сбивать чужой набор текста.
+        const payload = msg.payload || {};
+        const note = this.storage.noteById(payload.noteId);
+        if (note) {
+          const next = normalizeNote({ ...note, ...payload, id: note.id });
+          note.x = next.x;
+          note.y = next.y;
+          note.w = next.w;
+          note.h = next.h;
+          this.notesChanged();
+        }
+        break;
+      }
+      case 'noteText': {
+        const payload = msg.payload || {};
+        const note = this.storage.noteById(payload.noteId);
+        if (note) {
+          note.text = typeof payload.text === 'string' ? payload.text.slice(0, MAX_NOTE_LEN) : '';
+          this.notesChanged();
+        }
+        break;
+      }
       case 'addPage': {
         this.storage.insertPageAfter(msg.payload.afterId, msg.payload.pageId);
         window.dispatchEvent(new CustomEvent('pagesChanged'));
@@ -572,16 +619,19 @@ export class NetworkManager {
           this.storage.selection = null;
           this.storage.selected = null;
           window.dispatchEvent(new CustomEvent('pagesChanged'));
+          this.notesChanged();
         }
         break;
       }
       case 'clearBoard': {
         this.storage.strokes = [];
         this.storage.images = [];
+        this.storage.notes = [];
         this.storage.selected = null;
         this.storage.selection = null;
         this.storage.contentBottom = 0;
         this.storage.cameraY = 0;
+        this.notesChanged();
         break;
       }
       case 'undo': {

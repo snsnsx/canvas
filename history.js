@@ -49,11 +49,8 @@ export class HistoryManager {
         break;
       }
       case 'delete': {
-        if (action.objectType === 'stroke') {
-          this.storage.strokes.push(action.objectData);
-        } else if (action.objectType === 'image') {
-          this.storage.images.push(action.objectData);
-        }
+        this.listFor(action.objectType).push(action.objectData);
+        if (action.objectType === 'note') this.notesChanged();
         inverseOp = {
           type: 'restoreObject',
           payload: {
@@ -101,6 +98,15 @@ export class HistoryManager {
         };
         break;
       }
+      case 'add_note': {
+        this.storage.removeNote(action.id);
+        this.notesChanged();
+        inverseOp = {
+          type: 'deleteObject',
+          payload: { objectId: action.id }
+        };
+        break;
+      }
       case 'clear': {
         this.storage.strokes = action.strokes.slice();
         this.storage.images = action.images.slice();
@@ -121,10 +127,10 @@ export class HistoryManager {
       }
       case 'batch_delete': {
         for (const item of action.items) {
-          if (item.objectType === 'stroke') this.storage.strokes.push(item.objectData);
-          else this.storage.images.push(item.objectData);
+          this.listFor(item.objectType).push(item.objectData);
           this.sendRestore(item.objectData, item.objectType);
         }
+        if (action.items.some(item => item.objectType === 'note')) this.notesChanged();
         break;
       }
       case 'batch_move': {
@@ -175,13 +181,10 @@ export class HistoryManager {
         break;
       }
       case 'delete': {
-        if (action.objectType === 'stroke') {
-          const idx = this.storage.strokes.findIndex(s => s.id === action.id);
-          if (idx >= 0) this.storage.strokes.splice(idx, 1);
-        } else if (action.objectType === 'image') {
-          const idx = this.storage.images.findIndex(im => im.id === action.id);
-          if (idx >= 0) this.storage.images.splice(idx, 1);
-        }
+        const list = this.listFor(action.objectType);
+        const idx = list.findIndex(object => object.id === action.id);
+        if (idx >= 0) list.splice(idx, 1);
+        if (action.objectType === 'note') this.notesChanged();
         op = {
           type: 'deleteObject',
           payload: { objectId: action.id }
@@ -223,13 +226,26 @@ export class HistoryManager {
         };
         break;
       }
+      case 'add_note': {
+        if (!this.storage.noteById(action.id)) this.storage.notes.push(action.note);
+        this.notesChanged();
+        op = {
+          type: 'restoreObject',
+          payload: {
+            objectId: action.id,
+            data: { type: 'note', ...action.note }
+          }
+        };
+        break;
+      }
       case 'batch_delete': {
         for (const item of action.items) {
-          const list = item.objectType === 'stroke' ? this.storage.strokes : this.storage.images;
+          const list = this.listFor(item.objectType);
           const idx = list.findIndex(object => object.id === item.id);
           if (idx >= 0) list.splice(idx, 1);
           this.network.send({ type: 'deleteObject', payload: { objectId: item.id } });
         }
+        if (action.items.some(item => item.objectType === 'note')) this.notesChanged();
         break;
       }
       case 'batch_move': {
@@ -273,10 +289,27 @@ export class HistoryManager {
     image.h = snapshot.h;
   }
 
+  // Куда возвращать объект: у каждого типа свой список в снимке доски.
+  listFor(objectType) {
+    if (objectType === 'stroke') return this.storage.strokes;
+    if (objectType === 'note') return this.storage.notes;
+    return this.storage.images;
+  }
+
+  // Плавающие окна — элементы DOM: перерисовка холста их не обновляет.
+  notesChanged() {
+    window.dispatchEvent(new CustomEvent('notesChanged'));
+  }
+
   sendRestore(object, objectType) {
-    const data = objectType === 'stroke'
-      ? { id: object.id, type: 'stroke', page: object.page, tool: object.tool, color: object.color, size: object.size, points: object.points }
-      : { id: object.id, type: 'image', page: object.page, src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
+    let data;
+    if (objectType === 'stroke') {
+      data = { id: object.id, type: 'stroke', page: object.page, tool: object.tool, color: object.color, size: object.size, points: object.points };
+    } else if (objectType === 'note') {
+      data = { id: object.id, type: 'note', page: object.page, x: object.x, y: object.y, w: object.w, h: object.h, text: object.text };
+    } else {
+      data = { id: object.id, type: 'image', page: object.page, src: object.src, x: object.x, y: object.y, w: object.w, h: object.h };
+    }
     this.network.send({ type: 'restoreObject', payload: { objectId: object.id, data } });
   }
 }

@@ -10,6 +10,62 @@ export const SIZE_PRESETS = {                 // пресеты толщины �
 export const SIZE_DEFAULT = { pen:1, highlighter:1, eraser:1 };  // индексы пресета (S/M/L)
 export const MAX_EXPORT_H = 12000;            // ограничение высоты экспорта
 
+// --- Плавающие окна (заметки) ---
+//
+// Штрихи и картинки живут в мировых координатах листа и уезжают вместе с
+// камерой. Плавающее окно — наоборот: оно приклеено к ЭКРАНУ, а не к бумаге,
+// поэтому прокрутка его не двигает. Чтобы «одна и та же часть экрана» значила
+// одно и то же на телефоне и на мониторе, координаты хранятся долями видимой
+// области: x/y — левый верхний угол, w/h — размер, всё в диапазоне 0…1.
+export const NOTE_DEFAULT_W = 0.28;
+export const NOTE_DEFAULT_H = 0.22;
+export const NOTE_MIN_FRAC = 0.06;            // окно не может схлопнуться в точку
+export const MAX_NOTE_LEN = 4000;             // предел длины текста одного окна
+
+// Доля видимой области: всё, что не число или вне 0…1, приводится к границе.
+export function clampUnit(v, fallback = 0) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
+function noteSide(v, fallback) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(NOTE_MIN_FRAC, Math.min(1, n));
+}
+
+// Единая нормализация окна: и для снимка доски, и для сообщений по сети.
+// Чужой клиент (или старый снимок) не должен уметь прислать окно с NaN-долей
+// или текстом на мегабайт.
+export function normalizeNote(raw, fallbackPage = DEFAULT_PAGE_ID) {
+  const src = raw || {};
+  return {
+    id: src.id || generateUUID(),
+    page: src.page || fallbackPage,
+    x: clampUnit(src.x, 0.06),
+    y: clampUnit(src.y, 0.08),
+    w: noteSide(src.w, NOTE_DEFAULT_W),
+    h: noteSide(src.h, NOTE_DEFAULT_H),
+    text: typeof src.text === 'string' ? src.text.slice(0, MAX_NOTE_LEN) : ''
+  };
+}
+
+// Ввод с клавиатуры внутри поля: горячие клавиши доски (undo, Backspace,
+// однобуквенные инструменты) в это время должны молчать — иначе набор текста
+// в плавающем окне стирает выделение или переключает инструмент.
+export function isTypingTarget(el) {
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = (el.tagName || '').toLowerCase();
+  if (tag === 'textarea') return true;
+  if (tag !== 'input') return false;
+  // file/checkbox/radio и прочие «кнопочные» поля текст не принимают: после
+  // выбора картинки фокус остаётся на #fileInput, и горячие клавиши доски
+  // должны продолжать работать.
+  return !/^(file|checkbox|radio|button|submit|reset|range|color|image)$/i.test(el.type || 'text');
+}
+
 // Точки приходят с сервера и по сети в компактном виде [x, y] / [x, y, pressure]
 // (втрое меньше байт, чем {"x":…,"y":…}). Внутри клиента точка — объект: так её
 // читают рендер, лассо и история. Разворачиваем один раз при загрузке снимка.
@@ -57,6 +113,9 @@ export class BoardStorage {
 
     this.strokes = [];                      // [{id, page, tool, color, size, points:[{x,y}], minY, maxY}]
     this.images  = [];                      // [{id, page, src, img, x, y, w, h}]
+    // Плавающие окна: координаты — доли экрана, а не мира (см. normalizeNote).
+    // Живут в DOM поверх холста, поэтому в рендер канвы не попадают.
+    this.notes   = [];                      // [{id, page, x, y, w, h, text}]
     this.contentBottom = 0;                 // нижняя граница содержимого (мир)
     this.cameraY = 0;                       // смещение «камеры» вниз (мир)
     this.selected = null;                   // выбранное изображение
@@ -96,7 +155,8 @@ export class BoardStorage {
         w: im.w,
         h: im.h,
         src: im.src
-      }))
+      })),
+      notes: this.notes.map(n => normalizeNote(n))
     });
   }
 
@@ -155,11 +215,29 @@ export class BoardStorage {
       return im;
     });
 
+    this.notes = (o.notes || []).map(d => {
+      const note = normalizeNote(d);
+      this.ensurePage(note.page);
+      return note;
+    });
+
     this.selected = null;
     this.selection = null;
     this.recomputeContentBottom();
-    if (window.dispatchEvent) window.dispatchEvent(new CustomEvent('pagesChanged'));
+    if (window.dispatchEvent) {
+      window.dispatchEvent(new CustomEvent('pagesChanged'));
+      window.dispatchEvent(new CustomEvent('notesChanged'));
+    }
     return true;
+  }
+
+  noteById(id) {
+    return this.notes.find(n => n.id === id);
+  }
+
+  removeNote(id) {
+    const at = this.notes.findIndex(n => n.id === id);
+    return at < 0 ? null : this.notes.splice(at, 1)[0];
   }
 
   // --- Страницы (блокнот) ---
@@ -193,8 +271,10 @@ export class BoardStorage {
     if (at < 0 || this.pages.length <= 1) return null;
     const strokes = this.strokes.filter(s => s.page === id);
     const images = this.images.filter(im => im.page === id);
+    const notes = this.notes.filter(n => n.page === id);
     this.strokes = this.strokes.filter(s => s.page !== id);
     this.images = this.images.filter(im => im.page !== id);
+    this.notes = this.notes.filter(n => n.page !== id);
     this.pages.splice(at, 1);
     this.pageScroll.delete(id);
     if (this.currentPageId === id) {
@@ -204,7 +284,7 @@ export class BoardStorage {
       this.cameraY = this.recallScroll(this.currentPageId);
     }
     this.recomputeContentBottom();
-    return { index: at, strokes, images };
+    return { index: at, strokes, images, notes };
   }
 
   // --- Позиция просмотра по листам ---

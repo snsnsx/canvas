@@ -5,7 +5,8 @@ import {
   DEFAULT_HL,
   SIZE_PRESETS,
   MAX_EXPORT_H,
-  generateUUID
+  generateUUID,
+  isTypingTarget
 } from './storage.js';
 
 // --- Жест «дотянуть до следующего листа» ---
@@ -385,6 +386,10 @@ export class ToolManager {
   // --- Keyboard Shortcuts ---
 
   onKeyDown(e) {
+    // Набор текста в плавающем окне — не команда доске: ни Cmd+Z, ни Backspace,
+    // ни однобуквенные переключатели инструментов здесь не срабатывают.
+    if (isTypingTarget(e.target)) return;
+
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault();
@@ -406,7 +411,6 @@ export class ToolManager {
       }
       return;
     }
-    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
 
     switch (e.key.toLowerCase()) {
       case 'p': this.storage.tool = 'pen'; this.syncTools(); break;
@@ -1413,7 +1417,8 @@ export class ToolManager {
     const cur = this.storage.currentPageId;
     const strokes = this.storage.strokes.filter(s => s.page === cur);
     const images = this.storage.images.filter(im => im.page === cur);
-    if (!strokes.length && !images.length) return false;
+    const notes = this.storage.notes.filter(n => n.page === cur);
+    if (!strokes.length && !images.length && !notes.length) return false;
 
     const items = [];
     for (const s of strokes) {
@@ -1424,13 +1429,21 @@ export class ToolManager {
       items.push({ id: im.id, objectType: 'image', objectData: im });
       this.network.send({ type: 'deleteObject', payload: { objectId: im.id } });
     }
+    // Плавающие окна — тоже содержимое листа: «Очистить страницу» убирает и их
+    // (обратимо через undo, как и всё остальное в этом пакете).
+    for (const n of notes) {
+      items.push({ id: n.id, objectType: 'note', objectData: n });
+      this.network.send({ type: 'deleteObject', payload: { objectId: n.id } });
+    }
 
     this.storage.strokes = this.storage.strokes.filter(s => s.page !== cur);
     this.storage.images = this.storage.images.filter(im => im.page !== cur);
+    this.storage.notes = this.storage.notes.filter(n => n.page !== cur);
     this.storage.selected = null;
     this.storage.selection = null;
     this.storage.recomputeContentBottom();
     this.renderer.fullRender();
+    if (notes.length) window.dispatchEvent(new CustomEvent('notesChanged'));
 
     this.history.push({ type: 'batch_delete', items });
     return true;
@@ -1490,6 +1503,8 @@ export class ToolManager {
     this.network.sendCursorLeave();
     this.updatePageUI();
     this.renderer.clampCamera();
+    // Плавающие окна принадлежат листу: на новом листе показываются его окна.
+    window.dispatchEvent(new CustomEvent('pageChanged'));
   }
 
   // Автопереход на лист, где начал писать другой участник. Решение о переходе

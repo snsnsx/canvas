@@ -155,7 +155,7 @@
     gap: 0;
     padding: var(--tb-pad);
     border: 1px solid var(--line);
-    border-radius: 15px;
+    border-radius: 20px;
     background: var(--panel);
     box-shadow: var(--shadow);
     backdrop-filter: blur(18px) saturate(140%);
@@ -356,7 +356,7 @@
   .swatch .dot {
     width: 22px;
     height: 20px;
-    border-radius: 7px;
+    border-radius: 9px;
     border: 1px solid rgba(0, 0, 0, 0.16);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
     transition: box-shadow 120ms ease, transform 120ms ease;
@@ -374,7 +374,7 @@
   .swatch.hl .dot {
     width: 25px;
     height: 20px;
-    border-radius: 6px;
+    border-radius: 8px;
   }
 
   .swatch:hover .dot {
@@ -394,7 +394,7 @@
     width: 18px;
     height: 18px;
     display: inline-block;
-    border-radius: 5px;
+    border-radius: 7px;
     background: var(--text);
     color: var(--panel-solid);
     transition: box-shadow 120ms ease, transform 120ms ease;
@@ -543,6 +543,143 @@
     border: 0;
   }
 
+  /* --- Плавающие окна (заметки) ---
+     Слой лежит поверх холста и НЕ участвует в прокрутке: камера уезжает, окно
+     остаётся на том же месте экрана. Координаты окна — доли рабочей области,
+     поэтому у всех участников оно оказывается в одной и той же её части. */
+  .notes {
+    position: absolute;
+    inset: 0;
+    z-index: 13;
+    pointer-events: none;
+  }
+
+  .note {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    cursor: default;
+    pointer-events: auto;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  .note:focus-within {
+    border-color: var(--accent-line);
+  }
+
+  .note.dragging {
+    box-shadow: 0 26px 60px rgba(0, 0, 0, 0.16), 0 3px 12px rgba(0, 0, 0, 0.07);
+  }
+
+  /* Шапка — единственное место, за которое окно двигают: внутри текста жест
+     принадлежит выделению, а не перетаскиванию. */
+  .note-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 4px 0 9px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(21, 21, 21, 0.045);
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .note.dragging .note-bar {
+    cursor: grabbing;
+  }
+
+  .note-grip {
+    flex: 1;
+    height: 9px;
+    background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.15px);
+    background-size: 6px 5px;
+    opacity: 0.75;
+  }
+
+  .note-close {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .note-close:hover {
+    background: rgba(207, 46, 46, 0.12);
+    color: var(--danger);
+  }
+
+  .note-close svg {
+    display: block;
+    width: 12px;
+    height: 12px;
+  }
+
+  .note-text {
+    flex: 1;
+    width: 100%;
+    padding: 9px 11px 11px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.45;
+    resize: none;
+    overflow: auto;
+    cursor: text;
+    /* Холст запрещает выделение и жесты на всём body — полю текста они нужны. */
+    touch-action: auto;
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  .note-text::placeholder {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+
+  .note-resize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 20px;
+    height: 20px;
+    cursor: nwse-resize;
+    touch-action: none;
+  }
+
+  /* Уголок-«уголок»: две насечки, как у ручки изменения размера картинки. */
+  .note-resize::after {
+    content: "";
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 9px;
+    height: 9px;
+    border-right: 1.5px solid var(--line-strong);
+    border-bottom: 1.5px solid var(--line-strong);
+    border-bottom-right-radius: 3px;
+  }
+
   /* Панель страниц (блокнот) — слева, в стиле основного toolbar. */
   .pagebar {
     position: fixed;
@@ -556,7 +693,7 @@
     gap: 0;
     padding: var(--tb-pad);
     border: 1px solid var(--line);
-    border-radius: 15px;
+    border-radius: 20px;
     background: var(--panel);
     box-shadow: var(--shadow);
     backdrop-filter: blur(18px) saturate(140%);
@@ -745,6 +882,7 @@
     <canvas id="ink"></canvas>
     <canvas id="overlay"></canvas>
     <div id="pageEdge" class="page-edge" aria-hidden="true"></div>
+    <div id="notes" class="notes"></div>
     <div id="eraserCursor" class="eraser-cursor" aria-hidden="true"></div>
     <div id="vbar" class="vbar" aria-hidden="true">
       <div id="thumb" class="thumb"></div>
@@ -774,7 +912,10 @@
       <div id="sizes" class="sizes set-start" aria-label="Толщина линии"></div>
     </div>
 
-    <div class="group" aria-label="Файлы">
+    <div class="group" aria-label="Вставка">
+      <button id="noteBtn" class="btn icon" type="button" aria-label="Добавить плавающее окно" title="Плавающее окно (N)">
+        <!--icon:note-->
+      </button>
       <button id="imgBtn" class="btn icon" type="button" aria-label="Добавить изображение" title="Добавить изображение">
         <!--icon:image-->
       </button>
@@ -832,6 +973,22 @@
 
   <input id="fileInput" class="sr-only" type="file" accept="image/*">
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Заготовка плавающего окна: разметка живёт здесь (и иконка подставляется
+       так же, как в тулбарах), а notes.js только клонирует её на каждое окно. -->
+  <template id="noteTpl">
+    <div class="note">
+      <div class="note-bar">
+        <span class="note-grip" aria-hidden="true"></span>
+        <button class="note-close" type="button" aria-label="Удалить окно" title="Удалить окно">
+          <!--icon:note-close-->
+        </button>
+      </div>
+      <textarea class="note-text" maxlength="4000" spellcheck="false"
+                aria-label="Текст плавающего окна" placeholder="Напишите что-нибудь…"></textarea>
+      <span class="note-resize" aria-hidden="true"></span>
+    </div>
+  </template>
 </main>
 
 <script type="module">
@@ -840,6 +997,7 @@ import { CanvasRenderer } from './canvas.js';
 import { NetworkManager } from './network.js';
 import { HistoryManager } from './history.js';
 import { ToolManager } from './tools.js';
+import { NotesManager } from './notes.js';
 
 (function() {
   "use strict";
@@ -857,6 +1015,9 @@ import { ToolManager } from './tools.js';
   network.onRemoteCursor = (clientId, point) => renderer.setRemoteCursor(clientId, point);
   const history = new HistoryManager(storage, network, () => renderer.scheduleRender());
   const tools = new ToolManager(storage, renderer, network, history);
+  // Плавающие окна — слой DOM поверх холста: они приклеены к экрану, а не к
+  // листу, поэтому камера их не двигает, а рендер канвы не касается.
+  const notes = new NotesManager(storage, network, history);
   // Участник ушёл на другой лист и начал там писать — уводим за ним остальных.
   network.onRemotePage = (pageId, point) => tools.followRemotePage(pageId, point);
   document.getElementById('presenceBtn')?.addEventListener('click', () => window.location.reload());
@@ -864,7 +1025,7 @@ import { ToolManager } from './tools.js';
   network.init();
 
   // Expose globally for testing/debugging
-  window._board = { storage, renderer, network, history, tools };
+  window._board = { storage, renderer, network, history, tools, notes };
 })();
 </script>
 </body>

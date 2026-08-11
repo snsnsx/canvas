@@ -28,6 +28,8 @@ DEFAULT_PAGE_ID = "page-1"   # id первой/легаси-страницы (с
 
 # Ограничения защиты и обслуживания памяти.
 MAX_WS_MESSAGE = 8 * 1024 * 1024   # кадр крупнее — почти наверняка мусор/атака
+MAX_NOTE_TEXT = 4000               # предел текста одного плавающего окна (как на клиенте)
+NOTE_MIN_FRAC = 0.06               # минимальная доля области, до которой можно сжать окно
 SAVE_MAX_DELAY = 15.0              # доска сохраняется не реже, чем раз в 15 с активности
 BOARD_IDLE_TTL = 600.0             # доска без клиентов выгружается из памяти через 10 мин
 SEND_TIMEOUT = 5.0                 # медленный клиент не должен держать рассылку
@@ -64,6 +66,32 @@ def _pack_point(p):
     pr = p.get("pressure")
     x, y = round(p.get("x", 0.0), 2), round(p.get("y", 0.0), 2)
     return [x, y] if pr is None else [x, y, round(pr, 3)]
+
+
+def _unit(v, default: float) -> float:
+    """Доля видимой области (0…1) для плавающего окна.
+
+    Координаты окна — не мировые: окно приклеено к экрану, а не к листу, и
+    хранится долями рабочей области, чтобы у всех участников оказываться в одной
+    и той же её части. Всё, что не число или вне диапазона, приводится к границе.
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    if f != f:                      # NaN
+        return default
+    return max(0.0, min(1.0, f))
+
+
+def _side(v, default: float) -> float:
+    """Размер окна долей области. Схлопнуться в точку окно не может."""
+    f = _unit(v, default)
+    return max(NOTE_MIN_FRAC, f) if f > 0 else default
+
+
+def _note_text(v) -> str:
+    return v[:MAX_NOTE_TEXT] if isinstance(v, str) else ""
 
 
 class BoardState:
@@ -137,12 +165,32 @@ class BoardState:
             }
             self._ensure_page(self.objects[iid]["page"])
 
+        # Плавающие окна (заметки). На высоту содержимого не влияют: они живут в
+        # экранных долях и с прокруткой листа не связаны.
+        for n in data.get("notes", []):
+            nid = n.get("id")
+            if not nid:
+                import uuid
+                nid = str(uuid.uuid4())
+            self.objects[nid] = {
+                "id": nid,
+                "type": "note",
+                "page": n.get("page", DEFAULT_PAGE_ID),
+                "x": _unit(n.get("x"), 0.06),
+                "y": _unit(n.get("y"), 0.08),
+                "w": _side(n.get("w"), 0.28),
+                "h": _side(n.get("h"), 0.22),
+                "text": _note_text(n.get("text"))
+            }
+            self._ensure_page(self.objects[nid]["page"])
+
         # Пересчёт по фактическим объектам: чинит старые доски и вертикальную границу.
         self.recompute_content_bottom()
 
     def to_dict(self) -> dict:
         strokes_list = []
         images_list = []
+        notes_list = []
         for obj in self.objects.values():
             if obj["type"] == "stroke":
                 strokes_list.append({
@@ -163,6 +211,16 @@ class BoardState:
                     "w": obj["w"],
                     "h": obj["h"]
                 })
+            elif obj["type"] == "note":
+                notes_list.append({
+                    "id": obj["id"],
+                    "page": obj.get("page", DEFAULT_PAGE_ID),
+                    "x": obj.get("x", 0.06),
+                    "y": obj.get("y", 0.08),
+                    "w": obj.get("w", 0.28),
+                    "h": obj.get("h", 0.22),
+                    "text": obj.get("text", "")
+                })
         return {
             "v": self.v,
             "pages": self.pages,
@@ -171,6 +229,7 @@ class BoardState:
             "hlColors": self.hlColors,
             "strokes": strokes_list,
             "images": images_list,
+            "notes": notes_list,
             "version": self.version
         }
 
@@ -278,6 +337,15 @@ class BoardState:
             self._ensure_page(data["page"])
             if data.get("type") == "stroke" and "points" in data:
                 data["points"] = [self._decode_point(p) for p in data["points"]]
+            elif data.get("type") == "note":
+                # Возврат окна после undo: доли приводим к диапазону так же, как
+                # при создании — снимок доски не должен принять NaN или гигабайт
+                # текста только потому, что объект пришёл «на восстановление».
+                data["x"] = _unit(data.get("x"), 0.06)
+                data["y"] = _unit(data.get("y"), 0.08)
+                data["w"] = _side(data.get("w"), 0.28)
+                data["h"] = _side(data.get("h"), 0.22)
+                data["text"] = _note_text(data.get("text"))
             data.pop("_maxY", None)
             self.objects[oid] = data
             self._bump_object(data)
@@ -308,6 +376,36 @@ class BoardState:
             self._ensure_page(obj["page"])
             self.objects[iid] = obj
             self._bump_object(obj)
+        elif op_type == "addNote":
+            # Плавающее окно: координаты — доли видимой области, а не мировые px
+            # (см. _unit). Границу содержимого листа окно не двигает.
+            nid = payload.get("noteId")
+            if nid:
+                obj = {
+                    "id": nid,
+                    "type": "note",
+                    "page": payload.get("page", DEFAULT_PAGE_ID),
+                    "x": _unit(payload.get("x"), 0.06),
+                    "y": _unit(payload.get("y"), 0.08),
+                    "w": _side(payload.get("w"), 0.28),
+                    "h": _side(payload.get("h"), 0.22),
+                    "text": _note_text(payload.get("text"))
+                }
+                self._ensure_page(obj["page"])
+                self.objects[nid] = obj
+        elif op_type == "updateNote":
+            obj = self.objects.get(payload.get("noteId"))
+            if obj is not None and obj.get("type") == "note":
+                for key, default in (("x", 0.06), ("y", 0.08)):
+                    if key in payload:
+                        obj[key] = _unit(payload[key], default)
+                for key, default in (("w", 0.28), ("h", 0.22)):
+                    if key in payload:
+                        obj[key] = _side(payload[key], default)
+        elif op_type == "noteText":
+            obj = self.objects.get(payload.get("noteId"))
+            if obj is not None and obj.get("type") == "note":
+                obj["text"] = _note_text(payload.get("text"))
         elif op_type == "addPage":
             page_id = payload.get("pageId")
             after_id = payload.get("afterId")
@@ -643,6 +741,10 @@ async def get_network():
 @app.get("/tools.js")
 async def get_tools():
     return FileResponse(os.path.join(BASE, "tools.js"), media_type="application/javascript", headers=JS_HEADERS)
+
+@app.get("/notes.js")
+async def get_notes():
+    return FileResponse(os.path.join(BASE, "notes.js"), media_type="application/javascript", headers=JS_HEADERS)
 
 @app.get("/gsap.min.js")
 async def get_gsap():
