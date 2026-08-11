@@ -34,6 +34,9 @@
     --ui-strong: #151515;
     --radius: 8px;
     --control: 32px;
+    /* Радиусы двух кнопок толщины настраиваются независимо друг от друга. */
+    --size-small-button-radius: 10px;
+    --size-large-button-radius: 12px;
 
     /* Шкала отступов тулбаров.
        Считаем расстояния между «чернилами» — видимыми глифами, а не между
@@ -354,12 +357,14 @@
 
   .size {
     --size-glyph-width: 18px;
+    --size-button-radius: var(--size-small-button-radius);
     width: calc(var(--size-glyph-width) + 14px);
-    border-radius: 8px;
+    border-radius: var(--size-button-radius);
   }
 
   .size[data-i="2"] {
     --size-glyph-width: 26px;
+    --size-button-radius: var(--size-large-button-radius);
   }
 
   .swatch .dot {
@@ -403,7 +408,7 @@
     width: var(--size-glyph-width);
     height: 18px;
     display: inline-block;
-    border-radius: 8px;
+    border-radius: var(--size-button-radius);
     background: var(--text);
     transition: box-shadow 120ms ease, transform 120ms ease;
   }
