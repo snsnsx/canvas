@@ -10,17 +10,26 @@ export const SIZE_PRESETS = {                 // пресеты толщины �
 export const SIZE_DEFAULT = { pen:1, highlighter:1, eraser:1 };  // индексы пресета (S/M/L)
 export const MAX_EXPORT_H = 12000;            // ограничение высоты экспорта
 
-// --- Плавающие окна (заметки) ---
+// --- Плавающие окна ---
 //
-// Штрихи и картинки живут в мировых координатах листа и уезжают вместе с
-// камерой. Плавающее окно — наоборот: оно приклеено к ЭКРАНУ, а не к бумаге,
-// поэтому прокрутка его не двигает. Чтобы «одна и та же часть экрана» значила
-// одно и то же на телефоне и на мониторе, координаты хранятся долями видимой
-// области: x/y — левый верхний угол, w/h — размер, всё в диапазоне 0…1.
-export const NOTE_DEFAULT_W = 0.28;
-export const NOTE_DEFAULT_H = 0.22;
-export const NOTE_MIN_FRAC = 0.06;            // окно не может схлопнуться в точку
-export const MAX_NOTE_LEN = 4000;             // предел длины текста одного окна
+// Окно — маленький холст поверх листа, на котором пишут теми же инструментами.
+// Штрихи и картинки листа живут в мировых координатах и уезжают вместе с
+// камерой; окно — наоборот, приклеено к ЭКРАНУ, поэтому прокрутка его не
+// двигает.
+//
+// Единицы измерения выбраны так, чтобы «одна и та же часть экрана» значила одно
+// и то же и на телефоне, и на мониторе:
+//   x, w, h — мировые px (доска всегда 1024 в ширину, см. BOARD_W). Ширина окна
+//             и толщина линий в нём масштабируются ровно как содержимое листа,
+//             поэтому у всех участников окно занимает одинаковую долю экрана и
+//             выглядит одинаково.
+//   y       — доля видимой высоты (0…1): высота экрана у всех разная, и только
+//             доля даёт одно и то же место по вертикали.
+// Штрихи внутри окна — в его собственных координатах (0…w, 0…h), тот же масштаб.
+export const NOTE_DEFAULT_W = 300;
+export const NOTE_DEFAULT_H = 210;
+export const NOTE_MIN_W = 130;
+export const NOTE_MIN_H = 90;
 
 // Доля видимой области: всё, что не число или вне 0…1, приводится к границе.
 export function clampUnit(v, fallback = 0) {
@@ -29,41 +38,39 @@ export function clampUnit(v, fallback = 0) {
   return Math.max(0, Math.min(1, n));
 }
 
-function noteSide(v, fallback) {
+function noteSide(v, fallback, min, max) {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.max(NOTE_MIN_FRAC, Math.min(1, n));
+  return Math.max(min, Math.min(max, n));
 }
 
-// Единая нормализация окна: и для снимка доски, и для сообщений по сети.
-// Чужой клиент (или старый снимок) не должен уметь прислать окно с NaN-долей
-// или текстом на мегабайт.
-export function normalizeNote(raw, fallbackPage = DEFAULT_PAGE_ID) {
+// Штрих внутри окна: тот же формат, что и на листе, минус страница и bbox —
+// окно маленькое, отсечения по видимости в нём не нужно.
+export function normalizeNoteStroke(raw) {
   const src = raw || {};
   return {
     id: src.id || generateUUID(),
-    page: src.page || fallbackPage,
-    x: clampUnit(src.x, 0.06),
-    y: clampUnit(src.y, 0.08),
-    w: noteSide(src.w, NOTE_DEFAULT_W),
-    h: noteSide(src.h, NOTE_DEFAULT_H),
-    text: typeof src.text === 'string' ? src.text.slice(0, MAX_NOTE_LEN) : ''
+    tool: src.tool === 'highlighter' || src.tool === 'eraser' ? src.tool : 'pen',
+    color: typeof src.color === 'string' ? src.color.slice(0, 32) : '#1d1d1d',
+    size: Number.isFinite(Number(src.size)) ? Math.max(0.5, Math.min(120, Number(src.size))) : 3.5,
+    points: decodePoints(src.points)
   };
 }
 
-// Ввод с клавиатуры внутри поля: горячие клавиши доски (undo, Backspace,
-// однобуквенные инструменты) в это время должны молчать — иначе набор текста
-// в плавающем окне стирает выделение или переключает инструмент.
-export function isTypingTarget(el) {
-  if (!el) return false;
-  if (el.isContentEditable) return true;
-  const tag = (el.tagName || '').toLowerCase();
-  if (tag === 'textarea') return true;
-  if (tag !== 'input') return false;
-  // file/checkbox/radio и прочие «кнопочные» поля текст не принимают: после
-  // выбора картинки фокус остаётся на #fileInput, и горячие клавиши доски
-  // должны продолжать работать.
-  return !/^(file|checkbox|radio|button|submit|reset|range|color|image)$/i.test(el.type || 'text');
+// Единая нормализация окна: и для снимка доски, и для сообщений по сети. Чужой
+// клиент (или старый снимок) не должен уметь прислать окно с NaN-координатой.
+export function normalizeNote(raw, fallbackPage = DEFAULT_PAGE_ID) {
+  const src = raw || {};
+  const w = noteSide(src.w, NOTE_DEFAULT_W, NOTE_MIN_W, BOARD_W);
+  return {
+    id: src.id || generateUUID(),
+    page: src.page || fallbackPage,
+    x: Math.max(0, Math.min(BOARD_W - w, Number(src.x) || 0)),
+    y: clampUnit(src.y, 0.1),
+    w,
+    h: noteSide(src.h, NOTE_DEFAULT_H, NOTE_MIN_H, PAGE_H),
+    strokes: (src.strokes || []).map(normalizeNoteStroke)
+  };
 }
 
 // Точки приходят с сервера и по сети в компактном виде [x, y] / [x, y, pressure]

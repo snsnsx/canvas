@@ -28,8 +28,10 @@ DEFAULT_PAGE_ID = "page-1"   # id первой/легаси-страницы (с
 
 # Ограничения защиты и обслуживания памяти.
 MAX_WS_MESSAGE = 8 * 1024 * 1024   # кадр крупнее — почти наверняка мусор/атака
-MAX_NOTE_TEXT = 4000               # предел текста одного плавающего окна (как на клиенте)
-NOTE_MIN_FRAC = 0.06               # минимальная доля области, до которой можно сжать окно
+BOARD_W = 1024.0                   # ширина доски в мировых px (совпадает с фронтендом)
+NOTE_MIN_W = 130.0                 # минимальный размер плавающего окна (мировые px)
+NOTE_MIN_H = 90.0
+PAGE_MAX_H = 8000.0                # предел размера окна по высоте (высота листа)
 SAVE_MAX_DELAY = 15.0              # доска сохраняется не реже, чем раз в 15 с активности
 BOARD_IDLE_TTL = 600.0             # доска без клиентов выгружается из памяти через 10 мин
 SEND_TIMEOUT = 5.0                 # медленный клиент не должен держать рассылку
@@ -68,30 +70,44 @@ def _pack_point(p):
     return [x, y] if pr is None else [x, y, round(pr, 3)]
 
 
-def _unit(v, default: float) -> float:
-    """Доля видимой области (0…1) для плавающего окна.
-
-    Координаты окна — не мировые: окно приклеено к экрану, а не к листу, и
-    хранится долями рабочей области, чтобы у всех участников оказываться в одной
-    и той же её части. Всё, что не число или вне диапазона, приводится к границе.
-    """
+def _num(v, default: float, lo: float, hi: float) -> float:
+    """Число в заданных границах; мусор и NaN заменяются значением по умолчанию."""
     try:
         f = float(v)
     except (TypeError, ValueError):
         return default
     if f != f:                      # NaN
         return default
-    return max(0.0, min(1.0, f))
+    return max(lo, min(hi, f))
 
 
-def _side(v, default: float) -> float:
-    """Размер окна долей области. Схлопнуться в точку окно не может."""
-    f = _unit(v, default)
-    return max(NOTE_MIN_FRAC, f) if f > 0 else default
+def _note_geometry(src: dict, base: dict = None) -> dict:
+    """Геометрия плавающего окна.
+
+    Окно приклеено к экрану, а не к листу, поэтому единицы у него смешанные:
+    x, w, h — мировые px (доска всегда 1024 в ширину, значит доля экрана по
+    горизонтали у всех одна), а y — доля видимой ВЫСОТЫ: высота окна браузера у
+    всех разная, и только доля ставит окно в одну и ту же часть экрана.
+    """
+    base = base or {}
+    w = _num(src.get("w", base.get("w")), NOTE_MIN_W * 2, NOTE_MIN_W, BOARD_W)
+    return {
+        "x": _num(src.get("x", base.get("x")), 60.0, 0.0, BOARD_W - w),
+        "y": _num(src.get("y", base.get("y")), 0.1, 0.0, 1.0),
+        "w": w,
+        "h": _num(src.get("h", base.get("h")), NOTE_MIN_H * 2, NOTE_MIN_H, PAGE_MAX_H)
+    }
 
 
-def _note_text(v) -> str:
-    return v[:MAX_NOTE_TEXT] if isinstance(v, str) else ""
+def _note_stroke(s: dict) -> dict:
+    """Штрих внутри окна: тот же формат, что и на листе, в координатах окна."""
+    return {
+        "id": s.get("id") or s.get("strokeId") or "",
+        "tool": s.get("tool", "pen"),
+        "color": s.get("color", "#000000"),
+        "size": _num(s.get("size"), 3.5, 0.5, 120.0),
+        "points": [BoardState._decode_point(p) for p in s.get("points", [])]
+    }
 
 
 class BoardState:
@@ -165,24 +181,22 @@ class BoardState:
             }
             self._ensure_page(self.objects[iid]["page"])
 
-        # Плавающие окна (заметки). На высоту содержимого не влияют: они живут в
-        # экранных долях и с прокруткой листа не связаны.
+        # Плавающие окна. На высоту содержимого листа не влияют: они приклеены к
+        # экрану, а их штрихи лежат во внутренних координатах окна.
         for n in data.get("notes", []):
             nid = n.get("id")
             if not nid:
                 import uuid
                 nid = str(uuid.uuid4())
-            self.objects[nid] = {
+            obj = {
                 "id": nid,
                 "type": "note",
                 "page": n.get("page", DEFAULT_PAGE_ID),
-                "x": _unit(n.get("x"), 0.06),
-                "y": _unit(n.get("y"), 0.08),
-                "w": _side(n.get("w"), 0.28),
-                "h": _side(n.get("h"), 0.22),
-                "text": _note_text(n.get("text"))
+                "strokes": [_note_stroke(s) for s in n.get("strokes", [])]
             }
-            self._ensure_page(self.objects[nid]["page"])
+            obj.update(_note_geometry(n))
+            self.objects[nid] = obj
+            self._ensure_page(obj["page"])
 
         # Пересчёт по фактическим объектам: чинит старые доски и вертикальную границу.
         self.recompute_content_bottom()
@@ -215,11 +229,17 @@ class BoardState:
                 notes_list.append({
                     "id": obj["id"],
                     "page": obj.get("page", DEFAULT_PAGE_ID),
-                    "x": obj.get("x", 0.06),
-                    "y": obj.get("y", 0.08),
-                    "w": obj.get("w", 0.28),
-                    "h": obj.get("h", 0.22),
-                    "text": obj.get("text", "")
+                    "x": obj.get("x", 60.0),
+                    "y": obj.get("y", 0.1),
+                    "w": obj.get("w", NOTE_MIN_W * 2),
+                    "h": obj.get("h", NOTE_MIN_H * 2),
+                    "strokes": [{
+                        "id": s["id"],
+                        "tool": s["tool"],
+                        "color": s["color"],
+                        "size": s["size"],
+                        "points": [_pack_point(p) for p in s["points"]]
+                    } for s in obj.get("strokes", [])]
                 })
         return {
             "v": self.v,
@@ -338,14 +358,11 @@ class BoardState:
             if data.get("type") == "stroke" and "points" in data:
                 data["points"] = [self._decode_point(p) for p in data["points"]]
             elif data.get("type") == "note":
-                # Возврат окна после undo: доли приводим к диапазону так же, как
-                # при создании — снимок доски не должен принять NaN или гигабайт
-                # текста только потому, что объект пришёл «на восстановление».
-                data["x"] = _unit(data.get("x"), 0.06)
-                data["y"] = _unit(data.get("y"), 0.08)
-                data["w"] = _side(data.get("w"), 0.28)
-                data["h"] = _side(data.get("h"), 0.22)
-                data["text"] = _note_text(data.get("text"))
+                # Возврат окна после undo: приводим к тем же границам, что и при
+                # создании — снимок доски не должен принять NaN или окно во весь
+                # экран только потому, что объект пришёл «на восстановление».
+                data.update(_note_geometry(data))
+                data["strokes"] = [_note_stroke(s) for s in data.get("strokes", [])]
             data.pop("_maxY", None)
             self.objects[oid] = data
             self._bump_object(data)
@@ -377,35 +394,43 @@ class BoardState:
             self.objects[iid] = obj
             self._bump_object(obj)
         elif op_type == "addNote":
-            # Плавающее окно: координаты — доли видимой области, а не мировые px
-            # (см. _unit). Границу содержимого листа окно не двигает.
+            # Плавающее окно. Границу содержимого листа оно не двигает: окно
+            # приклеено к экрану, а его штрихи — во внутренних координатах.
             nid = payload.get("noteId")
             if nid:
                 obj = {
                     "id": nid,
                     "type": "note",
                     "page": payload.get("page", DEFAULT_PAGE_ID),
-                    "x": _unit(payload.get("x"), 0.06),
-                    "y": _unit(payload.get("y"), 0.08),
-                    "w": _side(payload.get("w"), 0.28),
-                    "h": _side(payload.get("h"), 0.22),
-                    "text": _note_text(payload.get("text"))
+                    "strokes": []
                 }
+                obj.update(_note_geometry(payload))
                 self._ensure_page(obj["page"])
                 self.objects[nid] = obj
         elif op_type == "updateNote":
             obj = self.objects.get(payload.get("noteId"))
             if obj is not None and obj.get("type") == "note":
-                for key, default in (("x", 0.06), ("y", 0.08)):
-                    if key in payload:
-                        obj[key] = _unit(payload[key], default)
-                for key, default in (("w", 0.28), ("h", 0.22)):
-                    if key in payload:
-                        obj[key] = _side(payload[key], default)
-        elif op_type == "noteText":
+                obj.update(_note_geometry(payload, obj))
+        elif op_type == "noteStroke":
+            obj = self.objects.get(payload.get("noteId"))
+            sid = payload.get("strokeId")
+            if obj is not None and obj.get("type") == "note" and sid:
+                strokes = obj.setdefault("strokes", [])
+                # Повтор того же id приходит при redo — заменяем, а не двоим.
+                strokes[:] = [s for s in strokes if s["id"] != sid]
+                strokes.append(_note_stroke({**payload, "id": sid}))
+        elif op_type == "noteStrokePoints":
             obj = self.objects.get(payload.get("noteId"))
             if obj is not None and obj.get("type") == "note":
-                obj["text"] = _note_text(payload.get("text"))
+                for s in obj.get("strokes", []):
+                    if s["id"] == payload.get("strokeId"):
+                        s["points"].extend(self._decode_point(p) for p in payload.get("points", []))
+                        break
+        elif op_type == "noteStrokeDelete":
+            obj = self.objects.get(payload.get("noteId"))
+            if obj is not None and obj.get("type") == "note":
+                sid = payload.get("strokeId")
+                obj["strokes"] = [s for s in obj.get("strokes", []) if s["id"] != sid]
         elif op_type == "addPage":
             page_id = payload.get("pageId")
             after_id = payload.get("afterId")

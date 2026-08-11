@@ -1,4 +1,4 @@
-import { decodePoints, normalizeNote, MAX_NOTE_LEN } from './storage.js';
+import { decodePoints, normalizeNote, normalizeNoteStroke } from './storage.js';
 
 const EPHEMERAL_TYPES = new Set(['cursorMove', 'cursorLeave']);
 
@@ -590,7 +590,16 @@ export class NetworkManager {
         const payload = msg.payload || {};
         const note = this.storage.noteById(payload.noteId);
         if (note) {
-          const next = normalizeNote({ ...note, ...payload, id: note.id });
+          // Нормализуем только геометрию: пересобирать штрихи окна на каждый
+          // пакет перетаскивания незачем.
+          const next = normalizeNote({
+            id: note.id,
+            page: note.page,
+            x: payload.x ?? note.x,
+            y: payload.y ?? note.y,
+            w: payload.w ?? note.w,
+            h: payload.h ?? note.h
+          });
           note.x = next.x;
           note.y = next.y;
           note.w = next.w;
@@ -599,12 +608,36 @@ export class NetworkManager {
         }
         break;
       }
-      case 'noteText': {
+      case 'noteStroke': {
+        // Штрих в чужом окне: тот же формат, что и на листе, но координаты —
+        // внутренние координаты окна.
+        const payload = msg.payload || {};
+        const note = this.storage.noteById(payload.noteId);
+        if (note && !note.strokes.some(s => s.id === payload.strokeId)) {
+          note.strokes.push(normalizeNoteStroke({ ...payload, id: payload.strokeId }));
+          this.notesChanged();
+        }
+        break;
+      }
+      case 'noteStrokePoints': {
+        const payload = msg.payload || {};
+        const note = this.storage.noteById(payload.noteId);
+        const stroke = note && note.strokes.find(s => s.id === payload.strokeId);
+        if (stroke) {
+          stroke.points.push(...decodePoints(payload.points));
+          this.notesChanged();
+        }
+        break;
+      }
+      case 'noteStrokeDelete': {
         const payload = msg.payload || {};
         const note = this.storage.noteById(payload.noteId);
         if (note) {
-          note.text = typeof payload.text === 'string' ? payload.text.slice(0, MAX_NOTE_LEN) : '';
-          this.notesChanged();
+          const at = note.strokes.findIndex(s => s.id === payload.strokeId);
+          if (at >= 0) {
+            note.strokes.splice(at, 1);
+            this.notesChanged();
+          }
         }
         break;
       }

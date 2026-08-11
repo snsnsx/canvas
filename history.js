@@ -107,6 +107,21 @@ export class HistoryManager {
         };
         break;
       }
+      case 'note_draw': {
+        // Штрих внутри плавающего окна: окно могли уже удалить — тогда отменять
+        // нечего, само удаление лежит в стопке отдельным шагом.
+        const note = this.storage.noteById(action.noteId);
+        if (note) {
+          const at = note.strokes.findIndex(s => s.id === action.id);
+          if (at >= 0) note.strokes.splice(at, 1);
+          this.notesChanged();
+        }
+        inverseOp = {
+          type: 'noteStrokeDelete',
+          payload: { noteId: action.noteId, strokeId: action.id }
+        };
+        break;
+      }
       case 'clear': {
         this.storage.strokes = action.strokes.slice();
         this.storage.images = action.images.slice();
@@ -234,6 +249,25 @@ export class HistoryManager {
           payload: {
             objectId: action.id,
             data: { type: 'note', ...action.note }
+          }
+        };
+        break;
+      }
+      case 'note_draw': {
+        const note = this.storage.noteById(action.noteId);
+        if (note && !note.strokes.some(s => s.id === action.id)) {
+          note.strokes.push(action.stroke);
+          this.notesChanged();
+        }
+        op = {
+          type: 'noteStroke',
+          payload: {
+            noteId: action.noteId,
+            strokeId: action.id,
+            tool: action.stroke.tool,
+            color: action.stroke.color,
+            size: action.stroke.size,
+            points: action.stroke.points
           }
         };
         break;

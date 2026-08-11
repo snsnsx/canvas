@@ -5,8 +5,7 @@ import {
   DEFAULT_HL,
   SIZE_PRESETS,
   MAX_EXPORT_H,
-  generateUUID,
-  isTypingTarget
+  generateUUID
 } from './storage.js';
 
 // --- Жест «дотянуть до следующего листа» ---
@@ -386,10 +385,6 @@ export class ToolManager {
   // --- Keyboard Shortcuts ---
 
   onKeyDown(e) {
-    // Набор текста в плавающем окне — не команда доске: ни Cmd+Z, ни Backspace,
-    // ни однобуквенные переключатели инструментов здесь не срабатывают.
-    if (isTypingTarget(e.target)) return;
-
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault();
@@ -411,6 +406,7 @@ export class ToolManager {
       }
       return;
     }
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
 
     switch (e.key.toLowerCase()) {
       case 'p': this.storage.tool = 'pen'; this.syncTools(); break;

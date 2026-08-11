@@ -118,7 +118,10 @@
     cursor: default;
   }
 
-  .stage canvas {
+  /* Только три холста самого листа — они лежат друг на друге во всю рабочую
+     область. Холсты плавающих окон вложены глубже и живут по своим правилам,
+     поэтому здесь именно дочерний комбинатор, а не «любой canvas внутри». */
+  .stage > canvas {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -485,7 +488,9 @@
 
   .eraser-cursor {
     position: absolute;
-    z-index: 11;
+    /* Выше плавающих окон: ластиком работают и внутри них, а кольцо должно
+       показывать размер пятна и там. */
+    z-index: 14;
     width: 28px;
     height: 28px;
     border: 1.5px solid #a6425b;
@@ -543,17 +548,20 @@
     border: 0;
   }
 
-  /* --- Плавающие окна (заметки) ---
-     Слой лежит поверх холста и НЕ участвует в прокрутке: камера уезжает, окно
-     остаётся на том же месте экрана. Координаты окна — доли рабочей области,
-     поэтому у всех участников оно оказывается в одной и той же её части. */
+  /* --- Плавающие окна ---
+     Маленький холст поверх листа: пишут в нём теми же инструментами, что и на
+     доске. Слой НЕ участвует в прокрутке — камера уезжает, окно остаётся на том
+     же месте экрана, причём у всех участников в одной и той же его части
+     (единицы координат — см. normalizeNote в storage.js). */
   .notes {
     position: absolute;
     inset: 0;
-    z-index: 13;
+    z-index: 12;
     pointer-events: none;
   }
 
+  /* Ширину и высоту получает только холст внутри, а корпус обтекает его сам:
+     рамка и шапка не входят в мировые размеры окна. */
   .note {
     position: absolute;
     display: flex;
@@ -561,21 +569,30 @@
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: var(--panel);
+    background: var(--panel-solid);
     box-shadow: var(--shadow);
-    backdrop-filter: blur(18px) saturate(140%);
-    -webkit-backdrop-filter: blur(18px) saturate(140%);
     cursor: default;
     pointer-events: auto;
     transition: border-color 140ms ease, box-shadow 140ms ease;
   }
 
-  .note:focus-within {
-    border-color: var(--accent-line);
-  }
-
   .note.dragging {
     box-shadow: 0 26px 60px rgba(0, 0, 0, 0.16), 0 3px 12px rgba(0, 0, 0, 0.07);
+  }
+
+  .note-canvas {
+    display: block;
+    /* Жесты браузера (прокрутка, зум) здесь не нужны: холст ведёт линию. */
+    touch-action: none;
+    cursor: crosshair;
+  }
+
+  .stage.erase .note-canvas {
+    cursor: none;
+  }
+
+  .stage.lasso .note-canvas {
+    cursor: default;
   }
 
   /* Шапка — единственное место, за которое окно двигают: внутри текста жест
@@ -629,32 +646,6 @@
     display: block;
     width: 12px;
     height: 12px;
-  }
-
-  .note-text {
-    flex: 1;
-    width: 100%;
-    padding: 9px 11px 11px;
-    border: 0;
-    outline: none;
-    background: transparent;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 14px;
-    line-height: 1.45;
-    resize: none;
-    overflow: auto;
-    cursor: text;
-    /* Холст запрещает выделение и жесты на всём body — полю текста они нужны. */
-    touch-action: auto;
-    -webkit-user-select: text;
-    user-select: text;
-    -webkit-touch-callout: default;
-  }
-
-  .note-text::placeholder {
-    color: var(--muted);
-    opacity: 0.7;
   }
 
   .note-resize {
@@ -984,8 +975,7 @@
           <!--icon:note-close-->
         </button>
       </div>
-      <textarea class="note-text" maxlength="4000" spellcheck="false"
-                aria-label="Текст плавающего окна" placeholder="Напишите что-нибудь…"></textarea>
+      <canvas class="note-canvas" aria-label="Холст плавающего окна"></canvas>
       <span class="note-resize" aria-hidden="true"></span>
     </div>
   </template>
@@ -1015,9 +1005,10 @@ import { NotesManager } from './notes.js';
   network.onRemoteCursor = (clientId, point) => renderer.setRemoteCursor(clientId, point);
   const history = new HistoryManager(storage, network, () => renderer.scheduleRender());
   const tools = new ToolManager(storage, renderer, network, history);
-  // Плавающие окна — слой DOM поверх холста: они приклеены к экрану, а не к
-  // листу, поэтому камера их не двигает, а рендер канвы не касается.
-  const notes = new NotesManager(storage, network, history);
+  // Плавающие окна — маленькие холсты поверх листа: пишут в них теми же
+  // инструментами, но к экрану они приклеены, а не к бумаге, поэтому камера их
+  // не двигает.
+  const notes = new NotesManager(storage, renderer, network, history, tools);
   // Участник ушёл на другой лист и начал там писать — уводим за ним остальных.
   network.onRemotePage = (pageId, point) => tools.followRemotePage(pageId, point);
   document.getElementById('presenceBtn')?.addEventListener('click', () => window.location.reload());
