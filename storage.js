@@ -7,7 +7,7 @@ export const DEFAULT_HL  = ['#fde047','#7f46a4'];             // 2 цвета м
 export const SIZE_PRESETS = {                 // пресеты толщины по инструментам
   pen:[2,3.5,6], highlighter:[14,22,30], eraser:[16,28,46]
 };
-export const SIZE_DEFAULT = { pen:1, highlighter:1, eraser:1 };  // индексы пресета (S/M/L)
+export const SIZE_DEFAULT = { pen:1, highlighter:1, eraser:1 };  // индексы пресета толщины
 export const MAX_EXPORT_H = 12000;            // ограничение высоты экспорта
 
 // --- Плавающие окна ---

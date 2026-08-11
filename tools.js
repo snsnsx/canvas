@@ -271,16 +271,16 @@ export class ToolManager {
     if (!wrap) return;
     wrap.innerHTML = '';
     [
-      { presetIndex: 1, label: 'S', title: 'Размер S — средний', ariaLabel: 'Размер S: средняя толщина' },
-      { presetIndex: 2, label: 'M', title: 'Размер M — большой', ariaLabel: 'Размер M: большая толщина' }
-    ].forEach(({ presetIndex, label, title, ariaLabel }) => {
+      { presetIndex: 1, title: 'Средняя толщина', ariaLabel: 'Средняя толщина инструмента' },
+      { presetIndex: 2, title: 'Большая толщина', ariaLabel: 'Большая толщина инструмента' }
+    ].forEach(({ presetIndex, title, ariaLabel }) => {
       const b = document.createElement('button');
       b.className = 'size';
       b.dataset.i = presetIndex;
       b.title = title;
       b.setAttribute('aria-label', ariaLabel);
       b.setAttribute('aria-pressed', 'false');
-      b.innerHTML = `<span class="pip" aria-hidden="true"><sub>${label}</sub></span>`;
+      b.innerHTML = '<span class="pip" aria-hidden="true"></span>';
       b.addEventListener('click', () => {
         const t = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
         if (this.storage.tool === 'select' || this.storage.tool === 'lasso') {

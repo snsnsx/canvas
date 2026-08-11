@@ -353,7 +353,13 @@
   }
 
   .size {
+    --size-glyph-width: 18px;
+    width: calc(var(--size-glyph-width) + 14px);
     border-radius: 8px;
+  }
+
+  .size[data-i="2"] {
+    --size-glyph-width: 26px;
   }
 
   .swatch .dot {
@@ -394,24 +400,12 @@
 
   .size .pip {
     position: relative;
-    width: 18px;
+    width: var(--size-glyph-width);
     height: 18px;
     display: inline-block;
     border-radius: 7px;
     background: var(--text);
-    color: var(--panel-solid);
     transition: box-shadow 120ms ease, transform 120ms ease;
-  }
-
-  .size .pip sub {
-    position: absolute;
-    z-index: 1;
-    right: 2px;
-    bottom: 1px;
-    color: var(--panel-solid);
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
   }
 
   .size:hover .pip {
