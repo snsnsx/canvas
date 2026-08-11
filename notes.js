@@ -130,6 +130,14 @@ export class NotesManager {
 
     for (const [id, el] of this.els) {
       if (live.has(id)) continue;
+      // Окно могли удалить (или увести на другой лист) прямо под рукой: жест
+      // по исчезнувшему элементу уже не завершится сам, а незакрытый штрих
+      // навсегда заблокировал бы рисование в остальных окнах.
+      if (this.draw && this.draw.id === id) {
+        clearInterval(this.draw.timer);
+        this.draw = null;
+      }
+      if (this.drag && this.drag.id === id) this.drag = null;
       el.remove();
       this.els.delete(id);
     }
@@ -161,12 +169,26 @@ export class NotesManager {
     const box = el.getBoundingClientRect();
     el.style.left = Math.round(clamp(note.x * k, GUTTER, r.width - box.width - BAR_GUTTER)) + 'px';
     el.style.top = Math.round(clamp(note.y * r.height, GUTTER, r.height - box.height - GUTTER)) + 'px';
-    this.render(el, note);
+    this.scheduleRender();
   }
 
   // --- Рисование содержимого окна ---
+  //
+  // Перерисовка коалесится в один кадр: точки идут потоком и от своей руки, и от
+  // соседей, а холст окна маленький — незачем растеризовать его по нескольку раз
+  // за animation frame.
+  scheduleRender() {
+    if (this._paintRAF) return;
+    this._paintRAF = requestAnimationFrame(() => {
+      this._paintRAF = null;
+      for (const [id, node] of this.els) {
+        const note = this.storage.noteById(id);
+        if (note) this.paint(node, note);
+      }
+    });
+  }
 
-  render(el, note) {
+  paint(el, note) {
     const canvas = el.querySelector('.note-canvas');
     if (!canvas) return;
     const k = this.renderer.scale;
@@ -187,12 +209,6 @@ export class NotesManager {
     for (const s of note.strokes) this.renderer.drawStrokeTo(ctx, s, 0);
     const live = this.draw && this.draw.id === note.id ? this.draw.stroke : null;
     if (live) this.renderer.drawStrokeTo(ctx, live, 0);
-  }
-
-  renderNote(id) {
-    const el = this.els.get(id);
-    const note = this.storage.noteById(id);
-    if (el && note) this.render(el, note);
   }
 
   // --- Разметка одного окна ---
@@ -256,7 +272,9 @@ export class NotesManager {
   }
 
   beginStroke(e, el) {
-    if (e.button > 0 || this.drag) return;
+    if (e.button > 0 || this.drag || this.draw) return;      // один штрих за раз
+    // Отсечение ладони — как на листе: пока в руке перо, касания не рисуют.
+    if (e.pointerType === 'touch' && this.tools?.penActive) return;
     const note = this.storage.noteById(el.dataset.id);
     const tool = this.strokeTool();
     if (!note || !tool) return;
@@ -266,6 +284,9 @@ export class NotesManager {
     // Своё письмо не должно уводить лист: соседи могут писать на других
     // страницах, а мы заняты окном.
     this.network.pauseAutoFocus();
+    // Признак «в руке перо» общий с листом: лежащая на планшете ладонь не
+    // должна рисовать ни там, ни здесь.
+    if (e.pointerType === 'pen' && this.tools) this.tools.penActive = true;
 
     const color = tool === 'pen'
       ? this.storage.penColors[this.storage.penIdx]
@@ -297,7 +318,7 @@ export class NotesManager {
     // Точки уходят пачками, как на листе: соседи видят линию «вживую», но не
     // получают пакет на каждое движение указателя.
     this.draw.timer = setInterval(() => this.flushPoints(), POINT_FLUSH);
-    this.render(el, note);
+    this.scheduleRender();
   }
 
   extendStroke(e, el) {
@@ -313,10 +334,11 @@ export class NotesManager {
       d.stroke.points.push(pt);
       d.buffer.push(this.network.encodePoint(pt));
     }
-    this.render(el, note);
+    this.scheduleRender();
   }
 
   endStroke(e) {
+    if (e && e.pointerType === 'pen' && this.tools) this.tools.penActive = false;
     const d = this.draw;
     if (!d || (e && d.pid !== e.pointerId)) return;
     clearInterval(d.timer);
@@ -328,7 +350,7 @@ export class NotesManager {
       note.strokes.push(d.stroke);
       this.history?.push({ type: 'note_draw', noteId: note.id, id: d.stroke.id, stroke: d.stroke });
     }
-    this.renderNote(d.id);
+    this.scheduleRender();
   }
 
   flushPoints() {

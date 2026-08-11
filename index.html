@@ -722,7 +722,7 @@
 
   /* Резинка листа: пока прокрутку продолжают за конец страницы, лист (и его
      край) отъезжают на --pull, а отпущенный жест возвращает их пружиной. */
-  .stage.pulling canvas,
+  .stage.pulling > canvas,
   .stage.pulling .page-edge {
     transform: translateY(var(--pull, 0px));
   }
