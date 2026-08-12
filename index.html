@@ -277,22 +277,6 @@
     height: 22px;
   }
 
-  #eraserBtn,
-  #lassoBtn {
-    position: relative;
-  }
-
-  #eraserBtn .tool-index,
-  #lassoBtn .tool-index {
-    position: absolute;
-    bottom: 1px;
-    right: 2px;
-    color: var(--text);
-    font-size: 8px;
-    font-weight: 700;
-    line-height: 1;
-  }
-
   .btn.icon:hover .m-icon,
   .btn.icon.on .m-icon {
     transform: translateY(-1px);
@@ -893,11 +877,9 @@
     <div class="group tools" aria-label="Инструменты">
       <button id="lassoBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Лассо" title="Лассо (L)">
         <!--icon:lasso-->
-        <sup class="tool-index" aria-hidden="true">L</sup>
       </button>
       <button id="eraserBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Ластик" title="Ластик (E)">
         <!--icon:eraser-->
-        <sup class="tool-index" aria-hidden="true">E</sup>
       </button>
       <div id="sizes" class="sizes set-start" aria-label="Толщина линии"></div>
     </div>
