@@ -11,21 +11,26 @@
 <link rel="icon" href="/favicon-16.png?v=3" sizes="16x16" type="image/png">
 <link rel="alternate icon" href="/favicon.ico?v=3">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#eceeed">
 <!-- GSAP (локально) — плавные переходы между страницами. Классический скрипт
      грузится до отложенного модуля, поэтому window.gsap доступен в tools.js. -->
 <script src="/gsap.min.js"></script>
 <style>
   :root {
     color-scheme: light;
-    --app-bg: #f7f8f7;
+    /* Два материала интерфейса: серый «стол» — и всё белое, что на нём лежит.
+       Лист и панели одного тона, серый работает только как разделяющий их фон. */
+    --app-bg: #eceeed;
     --paper: #ffffff;
     --text: #151515;
     --muted: #6b6f6d;
     --line: rgba(21, 21, 21, 0.11);
     --line-strong: rgba(21, 21, 21, 0.18);
-    --panel: rgba(255, 255, 255, 0.86);
+    --panel: rgba(255, 255, 255, 0.9);
     --panel-solid: #ffffff;
+    /* Кромка бумаги — чуть заметнее внутренних линий: это край материала. */
+    --paper-edge: rgba(21, 21, 21, 0.15);
+    --paper-radius: 8px;
     --shadow: 0 18px 50px rgba(0, 0, 0, 0.10), 0 2px 10px rgba(0, 0, 0, 0.05);
     --accent: #10a37f;
     --accent-soft: rgba(57, 77, 254, 0.13);
@@ -58,9 +63,32 @@
     --tb-slack-pen: calc((var(--tb-pen-control) - 18px) / 2);
     --tb-slack-icon: calc((var(--control) - 21px) / 2);     /* иконка */
 
+    /* Верхняя строка интерфейса складывается из трёх величин, и обе внешние —
+       именно те зазоры, которые видно: от края окна до панели и от панели до
+       кромки листа. Высота панели считается, а не подбирается, поэтому запас
+       сверху сам подстраивается под --control и --tb-pad. */
+    --chrome-top: max(10px, env(safe-area-inset-top));   /* окно → верх панели */
+    --chrome-gap: 6px;                                   /* низ панели → кромка листа */
+    --chrome-h: calc(var(--control) + var(--tb-pad) * 2 + 2px);
     /* Запас сверху: холст начинается ниже панели инструментов, чтобы toolbar
-       не перекрывал то, что можно нарисовать у верхнего края. */
-    --top-reserve: calc(max(18px, env(safe-area-inset-top)) + var(--control) + 18px);
+       не перекрывал то, что можно нарисовать у верхнего края. С трёх остальных
+       сторон лист просто приподнят над краем окна. --side-reserve — это ширина
+       стола у края окна: слева она и есть поле листа, справа за ней начинается
+       дорожка прокрутки. */
+    --top-reserve: calc(var(--chrome-top) + var(--chrome-h) + var(--chrome-gap));
+    --side-reserve: max(12px, env(safe-area-inset-left), env(safe-area-inset-right));
+    --bottom-reserve: max(12px, env(safe-area-inset-bottom));
+
+    /* Полоса прокрутки убрана с бумаги на стол — в свою дорожку справа от листа.
+       Её внешний край стоит на тех же --side-reserve от окна, что и левое поле
+       листа: стол по краям окна везде одной ширины, а лист просто уступает
+       справа ширину дорожки. */
+    --scroll-w: 10px;
+    --scroll-gap: 8px;                                   /* кромка листа → полоса */
+    --scroll-lane: calc(var(--scroll-w) + var(--scroll-gap));
+    /* Правый край листа — он же правый край тулбара: панель и бумага держат
+       общую вертикаль, дорожка проходит снаружи от обеих. */
+    --paper-right: calc(var(--side-reserve) + var(--scroll-lane));
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
@@ -101,16 +129,34 @@
   .app {
     position: fixed;
     inset: 0;
-    /* Полоса запаса над холстом — того же цвета, что бумага, без шва. */
-    background: var(--paper);
+    /* Стол, на котором лежит лист: серый фон видно в полосе под панелями,
+       у нижнего края и в скруглениях углов бумаги. */
+    background: var(--app-bg);
   }
 
   .stage {
     position: absolute;
-    inset: var(--top-reserve, 0px) 0 0 0;
+    inset: var(--top-reserve, 0px) var(--paper-right, 0px) var(--bottom-reserve, 0px) var(--side-reserve, 0px);
     overflow: hidden;
+    /* Углы запечены в самом листе: overflow срезает по этому радиусу и холсты,
+       и плавающие окна, и уезжающую на резинке бумагу. */
+    border-radius: var(--paper-radius);
     background: var(--paper);
     cursor: crosshair;
+  }
+
+  /* Кромка листа по всем четырём сторонам: теперь стол виден и по бокам, так
+     что обрывать линию на углах было бы нечем. Отдельный слой поверх холстов,
+     а не border у .stage: рамка сдвинула бы содержимое и увела координаты пера
+     от экранных. */
+  .stage::after {
+    content: "";
+    position: absolute;
+    z-index: 16;
+    inset: 0;
+    border: 1px solid var(--paper-edge);
+    border-radius: inherit;
+    pointer-events: none;
   }
 
   .stage.erase {
@@ -150,10 +196,10 @@
   .toolbar {
     position: fixed;
     z-index: 20;
-    top: max(18px, env(safe-area-inset-top));
-    right: max(12px, env(safe-area-inset-right));
+    top: var(--chrome-top);
+    right: var(--paper-right);
     width: max-content;
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - var(--side-reserve) - var(--paper-right));
     display: flex;
     align-items: stretch;
     /* Весь горизонтальный воздух между группами живёт в padding самих групп —
@@ -275,6 +321,11 @@
   #eraserBtn .m-icon {
     width: 22px;
     height: 22px;
+  }
+
+  #exportBtn .m-icon {
+    width: 18px;
+    height: 18px;
   }
 
   .btn.icon:hover .m-icon,
@@ -444,10 +495,12 @@
   .vbar {
     position: fixed;
     z-index: 12;
-    top: calc(max(12px, env(safe-area-inset-top)) + 74px);
-    right: max(12px, env(safe-area-inset-right));
-    bottom: max(12px, env(safe-area-inset-bottom));
-    width: 10px;
+    /* Дорожка идёт по столу вдоль правой кромки листа и повторяет его высоту
+       ровно: положение бегунка читается как окно, вырезанное из страницы. */
+    top: var(--top-reserve);
+    right: var(--side-reserve);
+    bottom: var(--bottom-reserve);
+    width: var(--scroll-w);
     border-radius: 999px;
     background: rgba(21, 21, 21, 0.045);
     opacity: 1;
@@ -499,7 +552,7 @@
     position: fixed;
     z-index: 30;
     left: 50%;
-    bottom: max(18px, env(safe-area-inset-bottom));
+    bottom: calc(var(--bottom-reserve) + 12px);
     max-width: min(420px, calc(100vw - 32px));
     transform: translate(-50%, 12px);
     padding: 10px 14px;
@@ -658,10 +711,10 @@
   .pagebar {
     position: fixed;
     z-index: 20;
-    top: max(18px, env(safe-area-inset-top));
-    left: max(12px, env(safe-area-inset-left));
+    top: var(--chrome-top);
+    left: var(--side-reserve);
     width: max-content;
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - var(--side-reserve) - var(--paper-right));
     display: flex;
     align-items: stretch;
     gap: 0;
@@ -701,6 +754,59 @@
   @keyframes page-pulse {
     from { transform: scale(1.34); }
     to { transform: scale(1); }
+  }
+
+  /* На последнем листе стрелка «вперёд» не гаснет, а заводит новый лист:
+     об этом говорит верхний индекс «+» у её кончика. Отдельной кнопки
+     «добавить страницу» в блокноте нет — эта роль ушла на стрелку.
+     Крестик нарисован двумя полосками, а не глифом шрифта: так он остаётся
+     чётким на любом DPI и совпадает по скруглению со штрихами иконок. */
+  #nextPageBtn {
+    position: relative;
+  }
+
+  .page-next-plus {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 8px;
+    height: 8px;
+    opacity: 0;
+    transform: scale(0.4);
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
+    pointer-events: none;
+    transition: opacity 140ms ease, transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .page-next-plus::before,
+  .page-next-plus::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    border-radius: 999px;
+    background: var(--accent);
+    transform: translate(-50%, -50%);
+  }
+
+  .page-next-plus::before {
+    width: 8px;
+    height: 2px;
+  }
+
+  .page-next-plus::after {
+    width: 2px;
+    height: 8px;
+  }
+
+  #nextPageBtn.can-add .page-next-plus {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Индекс подхватывает подъём иконки на наведении — они читаются как один глиф. */
+  #nextPageBtn.can-add:hover .page-next-plus {
+    transform: translateY(-1px);
   }
 
   /* Резинка листа: пока прокрутку продолжают за конец страницы, лист (и его
@@ -797,27 +903,27 @@
      Порог — момент, когда они перестают помещаться рядом: дальше блокнот
      уезжает вниз-влево, иначе он наезжает на цвета пера. */
   @media (max-width: 920px) {
+    /* Блокнот всплывает над листом, а не садится на его кромку: нижняя граница
+       бумаги и запечённый угол остаются видны. */
     .pagebar {
       top: auto;
-      bottom: max(12px, env(safe-area-inset-bottom));
+      bottom: calc(var(--bottom-reserve) + 12px);
     }
   }
 
   @media (max-width: 760px) {
     :root {
       --control: 31px;
-      --top-reserve: calc(max(8px, env(safe-area-inset-top)) + var(--control) + 16px);
+      /* --top-reserve и --chrome-h пересчитаются сами: они выражены через
+         --chrome-top, --control и --tb-pad. */
+      --chrome-top: max(8px, env(safe-area-inset-top));
+      --side-reserve: max(8px, env(safe-area-inset-left), env(safe-area-inset-right));
+      --bottom-reserve: max(8px, env(safe-area-inset-bottom));
+      --paper-radius: 14px;
       /* Ступени поджимаются, но их порядок сохраняется: сосед < набор < группа. */
       --tb-pad: 5px;
       --tb-set: 6px;
       --tb-group: 12px;
-    }
-
-    .toolbar {
-      top: max(8px, env(safe-area-inset-top));
-      right: max(8px, env(safe-area-inset-right));
-      width: max-content;
-      max-width: calc(100vw - 16px);
     }
 
     .btn {
@@ -825,22 +931,17 @@
       font-size: 12px;
     }
 
-    .vbar {
-      top: calc(max(8px, env(safe-area-inset-top)) + 62px);
-      right: max(8px, env(safe-area-inset-right));
-    }
-
     /* На узких экранах уводим панель страниц вниз-влево, чтобы не пересекаться
        с основным toolbar сверху. */
     .pagebar {
       top: auto;
-      left: max(8px, env(safe-area-inset-left));
-      bottom: max(8px, env(safe-area-inset-bottom));
+      left: var(--side-reserve);
+      bottom: calc(var(--bottom-reserve) + 10px);
     }
 
     /* Индикатор не должен налезать ни на toolbar сверху, ни на панель страниц снизу. */
     .page-hint {
-      bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px);
+      bottom: calc(max(8px, env(safe-area-inset-bottom)) + 62px);
     }
 
     .page-hint.top {
@@ -925,14 +1026,12 @@
       <span id="pageIndicator" class="page-indicator" aria-live="polite" title="Текущая страница / всего">1/1</span>
       <button id="nextPageBtn" class="btn icon" type="button" aria-label="Следующая страница" title="Следующая страница (])">
         <!--icon:page-next-->
+        <span class="page-next-plus" aria-hidden="true"></span>
       </button>
     </div>
 
     <div class="group" aria-label="Управление страницами">
-      <button id="addPageBtn" class="btn icon" type="button" aria-label="Добавить страницу" title="Добавить страницу">
-        <!--icon:page-add-->
-      </button>
-      <button id="delPageBtn" class="btn icon set-start" type="button" aria-label="Удалить страницу" title="Удалить страницу">
+      <button id="delPageBtn" class="btn icon" type="button" aria-label="Удалить страницу" title="Удалить страницу">
         <!--icon:page-del-->
       </button>
     </div>

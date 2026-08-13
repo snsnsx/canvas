@@ -150,8 +150,7 @@ export class ToolManager {
 
     // Панель страниц (блокнот)
     document.getElementById('prevPageBtn')?.addEventListener('click', () => this.prevPage());
-    document.getElementById('nextPageBtn')?.addEventListener('click', () => this.nextPage());
-    document.getElementById('addPageBtn')?.addEventListener('click', () => this.addPage());
+    document.getElementById('nextPageBtn')?.addEventListener('click', () => this.nextPageOrAdd());
     document.getElementById('delPageBtn')?.addEventListener('click', () => this.deleteCurrentPage());
     // Обновление индикатора при изменениях страниц от удалённых клиентов / загрузки.
     // Удалённое удаление листа могло переставить камеру на соседний — вписываем
@@ -1455,7 +1454,18 @@ export class ToolManager {
     const next = document.getElementById('nextPageBtn');
     const del = document.getElementById('delPageBtn');
     if (prev) prev.disabled = idx <= 0;
-    if (next) next.disabled = idx >= total - 1;
+    // На последнем листе стрелка «вперёд» не гаснет, а заводит новый: об этом
+    // говорит верхний индекс «+» (отдельной кнопки добавления в блокноте нет).
+    if (next) {
+      const atEnd = idx >= total - 1;
+      next.disabled = false;
+      next.classList.toggle('can-add', atEnd);
+      const label = atEnd ? 'Добавить страницу' : 'Следующая страница';
+      // Подсказку про «]» показываем только в роли навигации: горячая клавиша
+      // остаётся листалкой и страниц не создаёт.
+      next.title = atEnd ? label : `${label} (])`;
+      next.setAttribute('aria-label', label);
+    }
     // Корзина активна всегда: на единственном листе она его очищает.
     if (del) {
       const label = total <= 1 ? 'Очистить страницу' : 'Удалить страницу';
@@ -1529,6 +1539,13 @@ export class ToolManager {
 
   nextPage() { this.goToPage(this.storage.currentPageIndex() + 1, 1); }
   prevPage() { this.goToPage(this.storage.currentPageIndex() - 1, -1); }
+
+  // Стрелка «вперёд» в блокноте: на последнем листе она заводит следующий —
+  // ровно то же, что делает жест «потянуть за край листа» (см. commitPull).
+  nextPageOrAdd() {
+    if (this.storage.currentPageIndex() >= this.storage.pages.length - 1) this.addPage();
+    else this.nextPage();
+  }
 
   addPage() {
     const afterId = this.storage.currentPageId;

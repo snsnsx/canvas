@@ -1,16 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+<svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 192 192" width="192" height="192" role="img" aria-label="Сохранить как PDF">
   <defs>
-    <linearGradient id="i-export-arrow" x1="12" y1="4" x2="12" y2="15" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#B8F7D4"/>
-      <stop offset="1" stop-color="#10A37F"/>
-    </linearGradient>
-    <linearGradient id="i-export-tray" x1="5" y1="13" x2="19" y2="21" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#E8EAED"/>
-      <stop offset="1" stop-color="#A8C7FA"/>
+    <clipPath id="body">
+      <path d="M9 0h149l34 34v149a9 9 0 0 1-9 9H9a9 9 0 0 1-9-9V9a9 9 0 0 1 9-9z"/>
+    </clipPath>
+    <linearGradient id="gloss" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".30"/>
+      <stop offset=".42" stop-color="#fff" stop-opacity=".06"/>
+      <stop offset=".58" stop-color="#fff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <path d="M12 4.5v9.1" stroke="url(#i-export-arrow)" stroke-width="3" stroke-linecap="round"/>
-  <path d="m8.5 10.6 3.5 3.5 3.5-3.5" fill="none" stroke="#087A62" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M6 14.8v2.8c0 1 .8 1.9 1.9 1.9h8.2c1 0 1.9-.8 1.9-1.9v-2.8" fill="none" stroke="url(#i-export-tray)" stroke-width="3" stroke-linecap="round"/>
-  <path d="M8.4 17.4h7.2" stroke="rgba(255,255,255,.72)" stroke-width="1.1" stroke-linecap="round"/>
+
+  <g clip-path="url(#body)">
+    <rect width="192" height="192" fill="#2F5FB3"/>
+    <rect y="188" width="192" height="4" fill="#0C1E42" opacity=".35"/>
+    <rect width="192" height="2" fill="#fff" opacity=".22"/>
+
+    <!-- shutter -->
+    <rect x="30" y="16" width="122" height="60" rx="4" fill="#CBD1DA"/>
+    <path d="M34 16h30v60H34a4 4 0 0 1-4-4V20a4 4 0 0 1 4-4z" fill="#E3E7ED"/>
+    <rect x="30" y="72" width="122" height="4" fill="#5E6878" opacity=".55"/>
+    <rect x="74" y="26" width="62" height="40" rx="2" fill="#24457E"/>
+
+    <!-- notch -->
+    <rect x="162" y="18" width="16" height="16" rx="3" fill="#0C1E42" opacity=".28"/>
+
+    <!-- label -->
+    <rect x="22" y="94" width="148" height="82" rx="4" fill="#F7F4EA" stroke="#142346" stroke-opacity=".12"/>
+    <text x="96" y="132" text-anchor="middle" font-family="Archivo, system-ui, sans-serif" font-size="36" font-weight="800" letter-spacing="1.5" fill="#C2352A">PDF</text>
+    <rect x="41" y="146" width="110" height="3" rx="1.5" fill="#142346" opacity=".16"/>
+    <rect x="41" y="153" width="68" height="3" rx="1.5" fill="#142346" opacity=".10"/>
+
+    <rect width="192" height="192" fill="url(#gloss)"/>
+  </g>
 </svg>
