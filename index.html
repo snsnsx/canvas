@@ -51,10 +51,10 @@
        отступы корректируются на «воздух» внутри тап-цели — --tb-slack-*.
        Три ступени, каждая заметно крупнее предыдущей:
          сосед по набору ~15px → соседний набор ~22px → соседняя группа 28px. */
-    --tb-pad: 6px;      /* внутренний отступ корпуса панели */
+    --tb-pad: 4px;      /* внутренний отступ корпуса панели */
     --tb-item: 2px;     /* зазор между тап-целями внутри набора */
-    --tb-set: 5px;      /* добавка на границе наборов внутри одной группы */
-    --tb-group: 14px;   /* от разделителя до глифа — поровну с обеих сторон */
+    --tb-set: 3px;      /* добавка на границе наборов внутри одной группы */
+    --tb-group: 10px;   /* от разделителя до глифа — поровну с обеих сторон */
     --tb-pen-control: 24px; /* компактнее только ряд цветов пера */
     /* Отступ от корпуса до глифа равен вертикальному: панель обтекает кнопки
        одинаково со всех сторон. */
@@ -73,22 +73,24 @@
     /* Запас сверху: холст начинается ниже панели инструментов, чтобы toolbar
        не перекрывал то, что можно нарисовать у верхнего края. С трёх остальных
        сторон лист просто приподнят над краем окна. --side-reserve — это ширина
-       стола у края окна: справа она и есть поле листа, слева за ней начинается
+       стола у края окна: слева она и есть поле листа, справа за ней начинается
        дорожка прокрутки. */
     --top-reserve: calc(var(--chrome-top) + var(--chrome-h) + var(--chrome-gap));
     --side-reserve: max(12px, env(safe-area-inset-left), env(safe-area-inset-right));
     --bottom-reserve: max(12px, env(safe-area-inset-bottom));
 
-    /* Полоса прокрутки убрана с бумаги на стол — в свою дорожку слева от листа.
-       Её внешний край стоит на тех же --side-reserve от окна, что и правое поле
+    /* Полоса прокрутки убрана с бумаги на стол — в свою дорожку справа от листа.
+       Её внешний край стоит на тех же --side-reserve от окна, что и левое поле
        листа: стол по краям окна везде одной ширины, а лист просто уступает
-       слева ширину дорожки. */
+       справа ширину дорожки. */
     --scroll-w: 10px;
     --scroll-gap: 8px;                                   /* полоса → кромка листа */
     --scroll-lane: calc(var(--scroll-w) + var(--scroll-gap));
-    /* Левый край листа — он же левый край панели страниц: панель и бумага держат
-       общую вертикаль, дорожка проходит снаружи от обеих. */
-    --paper-left: calc(var(--side-reserve) + var(--scroll-lane));
+    /* Кромки листа: левая — она же левый край панели страниц, правая — правый
+       край toolbar. Панели и бумага держат общую вертикаль, дорожка прокрутки
+       проходит снаружи от них справа. */
+    --paper-left: var(--side-reserve);
+    --paper-right: calc(var(--side-reserve) + var(--scroll-lane));
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
@@ -136,7 +138,7 @@
 
   .stage {
     position: absolute;
-    inset: var(--top-reserve, 0px) var(--side-reserve, 0px) var(--bottom-reserve, 0px) var(--paper-left, 0px);
+    inset: var(--top-reserve, 0px) var(--paper-right, 0px) var(--bottom-reserve, 0px) var(--paper-left, 0px);
     overflow: hidden;
     /* Углы запечены в самом листе: overflow срезает по этому радиусу и холсты,
        и плавающие окна, и уезжающую на резинке бумагу. */
@@ -197,9 +199,9 @@
     position: fixed;
     z-index: 20;
     top: var(--chrome-top);
-    right: var(--side-reserve);
+    right: var(--paper-right);
     width: max-content;
-    max-width: calc(100vw - var(--side-reserve) - var(--paper-left));
+    max-width: calc(100vw - var(--paper-left) - var(--paper-right));
     display: flex;
     align-items: stretch;
     /* Весь горизонтальный воздух между группами живёт в padding самих групп —
@@ -387,7 +389,7 @@
   /* Цвета пера собраны плотнее: видимый зазор между 18px-точками уменьшается
      с 16 до 8px, а высота зоны нажатия остаётся общей для всего toolbar. */
   #penColors .swatch {
-    width: var(--tb-pen-control);
+    width: var(--tb-pen-control)+2px;
   }
 
   .size {
@@ -403,7 +405,7 @@
   }
 
   .swatch .dot {
-    width: 22px;
+    width: 25px;
     height: 20px;
     border-radius: 9px;
     border: 1px solid rgba(0, 0, 0, 0.16);
@@ -438,13 +440,20 @@
       inset 0 0 0 1px rgba(255, 255, 255, 0.45);
   }
 
+  /* Номер набран прямо по залитой пилюле: ширина пилюли и так показывает
+     толщину, цифра лишь называет её — поэтому бокс кнопки не меняется. */
   .size .pip {
     position: relative;
     width: var(--size-glyph-width);
     height: 18px;
-    display: inline-block;
+    display: inline-grid;
+    place-items: center;
     border-radius: var(--size-button-radius);
     background: var(--text);
+    color: var(--paper);
+    font-size: 11px;
+    font-weight: 640;
+    line-height: 1;
     transition: box-shadow 120ms ease, transform 120ms ease;
   }
 
@@ -495,10 +504,10 @@
   .vbar {
     position: fixed;
     z-index: 12;
-    /* Дорожка идёт по столу вдоль левой кромки листа и повторяет его высоту
+    /* Дорожка идёт по столу вдоль правой кромки листа и повторяет его высоту
        ровно: положение бегунка читается как окно, вырезанное из страницы. */
     top: var(--top-reserve);
-    left: var(--side-reserve);
+    right: var(--side-reserve);
     bottom: var(--bottom-reserve);
     width: var(--scroll-w);
     border-radius: 999px;
@@ -714,7 +723,7 @@
     top: var(--chrome-top);
     left: var(--paper-left);
     width: max-content;
-    max-width: calc(100vw - var(--side-reserve) - var(--paper-left));
+    max-width: calc(100vw - var(--paper-left) - var(--paper-right));
     display: flex;
     align-items: stretch;
     gap: 0;

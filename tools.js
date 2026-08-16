@@ -279,7 +279,7 @@ export class ToolManager {
       b.title = title;
       b.setAttribute('aria-label', ariaLabel);
       b.setAttribute('aria-pressed', 'false');
-      b.innerHTML = '<span class="pip" aria-hidden="true"></span>';
+      b.innerHTML = `<span class="pip" aria-hidden="true">${presetIndex}</span>`;
       b.addEventListener('click', () => {
         const t = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
         if (this.storage.tool === 'select' || this.storage.tool === 'lasso') {
