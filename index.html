@@ -67,8 +67,8 @@
        именно те зазоры, которые видно: от края окна до панели и от панели до
        кромки листа. Высота панели считается, а не подбирается, поэтому запас
        сверху сам подстраивается под --control и --tb-pad. */
-    --chrome-top: max(10px, env(safe-area-inset-top));   /* окно → верх панели */
-    --chrome-gap: 6px;                                   /* низ панели → кромка листа */
+    --chrome-top: max(4px, env(safe-area-inset-top));   /* окно → верх панели */
+    --chrome-gap: 4px;                                   /* низ панели → кромка листа */
     --chrome-h: calc(var(--control) + var(--tb-pad) * 2 + 2px);
     /* Запас сверху: холст начинается ниже панели инструментов, чтобы toolbar
        не перекрывал то, что можно нарисовать у верхнего края. С трёх остальных
@@ -76,15 +76,15 @@
        стола у края окна: слева она и есть поле листа, справа за ней начинается
        дорожка прокрутки. */
     --top-reserve: calc(var(--chrome-top) + var(--chrome-h) + var(--chrome-gap));
-    --side-reserve: max(12px, env(safe-area-inset-left), env(safe-area-inset-right));
-    --bottom-reserve: max(12px, env(safe-area-inset-bottom));
+    --side-reserve: max(8px, env(safe-area-inset-left), env(safe-area-inset-right));
+    --bottom-reserve: max(10px, env(safe-area-inset-bottom));
 
     /* Полоса прокрутки убрана с бумаги на стол — в свою дорожку справа от листа.
        Её внешний край стоит на тех же --side-reserve от окна, что и левое поле
        листа: стол по краям окна везде одной ширины, а лист просто уступает
        справа ширину дорожки. */
     --scroll-w: 10px;
-    --scroll-gap: 8px;                                   /* полоса → кромка листа */
+    --scroll-gap: 6px;                                   /* полоса → кромка листа */
     --scroll-lane: calc(var(--scroll-w) + var(--scroll-gap));
     /* Кромки листа: левая — она же левый край панели страниц, правая — правый
        край toolbar. Панели и бумага держат общую вертикаль, дорожка прокрутки
