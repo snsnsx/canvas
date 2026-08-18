@@ -15,6 +15,10 @@ const PAGE_END_GAP = 90;
 // видеопамять растёт умеренно.
 const BAND_SCREENS = 3;
 
+// Радиус круглых ручек изображения (удаление, «хват»). Зона нажатия шире —
+// она задана в tools.js рядом с попаданиями.
+const HANDLE_R = 12;
+
 export class CanvasRenderer {
   constructor(storage) {
     this.storage = storage;
@@ -53,6 +57,7 @@ export class CanvasRenderer {
     this.activeStroke = null;   // штрих в процессе рисования (доносится поверх кэша)
     this.inkPaths = new WeakMap(); // готовые контуры штрихов (мировые координаты)
     this.lassoPath = null;      // активный контур лассо в мировых координатах
+    this.hoverImage = null;     // изображение под курсором мыши: подсказка «за это можно взять»
     this.remoteCursors = new Map();
     this._raf = null;           // id запланированного кадра рендера
     this._focusRAF = null;
@@ -611,6 +616,30 @@ export class CanvasRenderer {
       ctx.restore();
     }
 
+    // Наведение мыши на изображение. На десктопе курсор — единственное «перо»,
+    // поэтому нажатие по картинке рисует, а не хватает её. Рамка при наведении
+    // и «хват» в левом-верхнем углу дают картинке ручку: за неё её берут, не
+    // выходя из инструмента рисования. Палец берёт картинку прямо за тело, ему
+    // подсказка не нужна.
+    const hov = this.hoverImage;
+    if (hov && hov !== this.storage.selected
+        && hov.page === this.storage.currentPageId
+        && this.storage.imageById(hov.id) === hov) {
+      const k = this.scale;
+      const x = hov.x * k;
+      const y = (hov.y - this.storage.cameraY) * k;
+      const w = hov.w * k, h = hov.h * k;
+      ctx.save();
+      ctx.strokeStyle = accent;
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.restore();
+      const g = this.imageGrabHandle(hov);
+      if (g) this.drawGrabHandle(ctx, g.x, g.y, accent);
+    }
+
     const sel = this.storage.selected;
     if (sel) {
       const k = this.scale;
@@ -674,6 +703,48 @@ export class CanvasRenderer {
     }
     if (!Number.isFinite(minX)) return null;
     return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+  }
+
+  // Экранная позиция «хвата» — левый-верхний угол картинки. Угол, ушедший за
+  // кромку листа, поджимается внутрь: иначе ручка оказалась бы за пределами
+  // stage и взять изображение было бы нечем. Тот же расчёт использует попадание
+  // в tools.js, поэтому позиция считается здесь одним местом.
+  imageGrabHandle(im) {
+    if (!im) return null;
+    const k = this.scale;
+    const x = im.x * k;
+    const y = (im.y - this.storage.cameraY) * k;
+    const w = im.w * k, h = im.h * k;
+    if (y + h < 0 || y > this.H) return null;        // картинка вне кадра
+    const pad = HANDLE_R + 2;
+    return {
+      x: Math.min(Math.max(x, pad), Math.max(pad, Math.min(x + w - HANDLE_R, this.W - pad))),
+      y: Math.min(Math.max(y, pad), Math.max(pad, Math.min(y + h - HANDLE_R, this.H - pad)))
+    };
+  }
+
+  // Ручка перемещения: четыре стрелки — тот же смысл, что у курсора move.
+  drawGrabHandle(ctx, x, y, accent) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, HANDLE_R, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - 5.5, y); ctx.lineTo(x + 5.5, y);
+    ctx.moveTo(x, y - 5.5); ctx.lineTo(x, y + 5.5);
+    // Наконечники: по два усика на каждом конце креста
+    ctx.moveTo(x - 3, y - 2.5); ctx.lineTo(x - 5.5, y); ctx.lineTo(x - 3, y + 2.5);
+    ctx.moveTo(x + 3, y - 2.5); ctx.lineTo(x + 5.5, y); ctx.lineTo(x + 3, y + 2.5);
+    ctx.moveTo(x - 2.5, y - 3); ctx.lineTo(x, y - 5.5); ctx.lineTo(x + 2.5, y - 3);
+    ctx.moveTo(x - 2.5, y + 3); ctx.lineTo(x, y + 5.5); ctx.lineTo(x + 2.5, y + 3);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawDeleteHandle(ctx, x, y) {

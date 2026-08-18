@@ -23,6 +23,7 @@ const PULL_K     = 210;   // жёсткость пружины возврата
 const PULL_C     = 21;    // затухание пружины (чуть меньше критического — лёгкий отскок)
 const WHEEL_GAP  = 120;   // пауза, разделяющая два прокрута колесом
 const RING_LEN   = 2 * Math.PI * 9.4;   // длина кольца индикатора (r=9.4 в разметке)
+const GRAB_HIT   = 17;    // радиус зоны нажатия по «хвату» изображения (сама ручка — r=12)
 
 export class ToolManager {
   constructor(storage, renderer, network, history) {
@@ -102,6 +103,7 @@ export class ToolManager {
     this.overlay.addEventListener('pointercancel', (e) => this.onUp(e));
     this.overlay.addEventListener('pointerleave', () => {
       this.hideEraserCursor();
+      this.clearImageHover();
       this.network.sendCursorLeave();
     });
     this.overlay.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -407,6 +409,13 @@ export class ToolManager {
     }
     if (e.target && /input|textarea/i.test(e.target.tagName)) return;
 
+    if (e.key === 'Escape' && (this.storage.selected || this.storage.selection)) {
+      this.storage.selected = null;
+      this.storage.selection = null;
+      this.renderer.renderOverlay();
+      return;
+    }
+
     switch (e.key.toLowerCase()) {
       case 'p': this.storage.tool = 'pen'; this.syncTools(); break;
       case 'h': this.storage.tool = 'highlighter'; this.syncTools(); break;
@@ -508,6 +517,7 @@ export class ToolManager {
     if (this.isDrawingPointer(e)) {
       this.overlay.setPointerCapture(e.pointerId);
       if (this.storage.selected && this.beginImageDrag(e)) return;
+      if (this.beginImageGrab(e)) return;   // «хват» подсвеченной картинки
       this.startStroke(e);
       return;
     }
@@ -525,6 +535,7 @@ export class ToolManager {
 
   onMove(e) {
     this.updateEraserCursor(e);
+    this.updateImageHover(e);
     if (e.pointerId === this.drawPid && this.activeStroke) {
       this.extendStroke(e);
       return;
@@ -989,7 +1000,6 @@ export class ToolManager {
     const world = this.pointerWorld(e);
     const screen = this.pointerPos(e);
     const bounds = this.renderer.selectionBounds(this.storage.selection);
-    this.lassoPid = e.pointerId;
 
     if (bounds) {
       const k = this.renderer.scale;
@@ -997,10 +1007,10 @@ export class ToolManager {
       const deleteY = (bounds.y - this.storage.cameraY) * k - 14;
       if (Math.hypot(screen.sx - deleteX, screen.sy - deleteY) <= 17) {
         this.deleteLassoSelection();
-        this.lassoPid = null;
         return;
       }
       if (world.x >= bounds.x && world.x <= bounds.x + bounds.w && world.y >= bounds.y && world.y <= bounds.y + bounds.h) {
+        this.lassoPid = e.pointerId;
         this.lassoMode = 'move';
         this.lassoStart = world;
         this.lassoOriginal = this.snapshotSelection(this.storage.selection);
@@ -1008,7 +1018,17 @@ export class ToolManager {
       }
     }
 
+    // Лассо ничего не рисует, поэтому здесь картинку берут прямо за тело —
+    // обводить её контуром не нужно. Заодно работают её ручки: размер и
+    // удаление. Промах по картинке снимает выделение и начинает обводку.
+    if (this.storage.selected || this.hitImage(world.x, world.y)) {
+      this.storage.selection = null;
+      this.clearImageHover();
+      if (this.beginImageDrag(e)) return;
+    }
+
     this.storage.selection = null;
+    this.lassoPid = e.pointerId;
     this.lassoMode = 'draw';
     this.lassoStart = world;
     this.renderer.lassoPath = [world];
@@ -1156,6 +1176,7 @@ export class ToolManager {
       this.network.send({ type: 'deleteObject', payload: { objectId: im.id } });
     }
     this.storage.selection = null;
+    this.clearImageHover();
     this.storage.recomputeContentBottom();
     if (items.length) this.history.push({ type: 'batch_delete', items });
     this.renderer.fullRender();
@@ -1170,6 +1191,80 @@ export class ToolManager {
       if (wx >= im.x && wx <= im.x + im.w && wy >= im.y && wy <= im.y + im.h) return im;
     }
     return null;
+  }
+
+  // --- Наведение курсора на изображение ---
+  //
+  // Мышь на десктопе одновременно и рисует, и управляет объектами, поэтому
+  // нажатие по телу картинки оставлено рисованию: поверх изображения нужно
+  // писать. Управлять картинкой даёт «хват» — ручка в левом-верхнем углу,
+  // которая всплывает при наведении. В режиме лассо инструмент ничего не рисует,
+  // и там картинку можно брать за любое место (см. beginLasso).
+
+  updateImageHover(e) {
+    if (!this.isDrawingPointer(e)) return;
+    const busy = this.drawPid !== null || this.dragPid !== null
+      || this.panPid !== null || this.lassoPid !== null;
+    if (busy || (e.buttons && e.buttons !== 0)) { this.clearImageHover(); return; }
+
+    const { sx, sy } = this.pointerPos(e);
+    const k = this.renderer.scale;
+    const im = this.hitImage(sx / k, sy / k + this.storage.cameraY);
+    let hovered = (im && im !== this.storage.selected) ? im : null;
+
+    // Ручка сидит на самом углу, то есть половиной висит за границей картинки.
+    // Пока курсор на ней, подсветку не снимаем — иначе ручка исчезала бы прямо
+    // под курсором, который на неё нацелился.
+    if (!hovered) {
+      const prev = this.renderer.hoverImage;
+      if (prev && prev !== this.storage.selected && this.onGrabHandle(prev, sx, sy)) hovered = prev;
+    }
+
+    if (hovered !== this.renderer.hoverImage) {
+      this.renderer.hoverImage = hovered;
+      this.renderer.renderOverlay();
+    }
+
+    // Курсор «взять»: в лассо — над всей картинкой, в рисующих инструментах —
+    // только над самой ручкой, чтобы не обещать хват там, где будет линия.
+    const grabbable = !!hovered
+      && (this.storage.tool === 'lasso' || this.onGrabHandle(hovered, sx, sy));
+    this.stage.classList.toggle('grab', grabbable);
+  }
+
+  // Экранная точка (sx, sy) лежит на «хвате» картинки?
+  onGrabHandle(im, sx, sy) {
+    const g = this.renderer.imageGrabHandle(im);
+    return !!g && Math.hypot(sx - g.x, sy - g.y) <= GRAB_HIT;
+  }
+
+  clearImageHover() {
+    this.stage.classList.remove('grab');
+    if (this.renderer.hoverImage) {
+      this.renderer.hoverImage = null;
+      this.renderer.renderOverlay();
+    }
+  }
+
+  // Нажатие по «хвату» подсвеченной картинки: выделяем её и сразу тащим.
+  beginImageGrab(e) {
+    const im = this.renderer.hoverImage;
+    if (!im || im.page !== this.storage.currentPageId) return false;
+    if (this.storage.imageById(im.id) !== im) return false;   // картинку уже убрали
+    const { sx, sy } = this.pointerPos(e);
+    if (!this.onGrabHandle(im, sx, sy)) return false;
+
+    const k = this.renderer.scale;
+    this.storage.selected = im;
+    this.storage.selection = null;
+    this.clearImageHover();
+    this.dragPid = e.pointerId;
+    this.dragMode = 'move';
+    this.dragOff = { x: sx / k - im.x, y: sy / k + this.storage.cameraY - im.y };
+    this.dragStart = { x: im.x, y: im.y, w: im.w, h: im.h };
+    this.stage.classList.add('grabbing');
+    this.renderer.fullRender();
+    return true;
   }
 
   // Возвращает true, если палец/курсор задел изображение или его ручку
@@ -1211,6 +1306,7 @@ export class ToolManager {
       this.dragMode = 'move';
       this.dragOff = { x: wx - im.x, y: wy - im.y };
       this.dragStart = { x: im.x, y: im.y, w: im.w, h: im.h };
+      this.stage.classList.add('grabbing');
       this.renderer.fullRender();
       return true;
     }
@@ -1281,6 +1377,7 @@ export class ToolManager {
     this.dragMode = null;
     this.dragPid = null;
     this.dragStart = null;
+    this.stage.classList.remove('grabbing');
   }
 
   deleteSelected() {
@@ -1291,6 +1388,7 @@ export class ToolManager {
 
     this.storage.images.splice(idx, 1);
     this.storage.selected = null;
+    this.clearImageHover();
     this.storage.recomputeContentBottom();
     this.renderer.fullRender();
 
@@ -1436,6 +1534,7 @@ export class ToolManager {
     this.storage.notes = this.storage.notes.filter(n => n.page !== cur);
     this.storage.selected = null;
     this.storage.selection = null;
+    this.clearImageHover();
     this.storage.recomputeContentBottom();
     this.renderer.fullRender();
     if (notes.length) window.dispatchEvent(new CustomEvent('notesChanged'));
@@ -1493,6 +1592,7 @@ export class ToolManager {
     this.storage.selected = null;
     this.storage.selection = null;
     this.renderer.lassoPath = null;
+    this.clearImageHover();
     this.renderer.remoteCursors.clear();
     this.renderer.stopFocus();
     this.stopMomentum();
