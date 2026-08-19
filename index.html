@@ -828,6 +828,191 @@
     transform: translateY(-1px);
   }
 
+  /* --- Быстрая панель ---
+     Плавающая палитра на шесть ячеек: сверху ластик и два маркера, снизу три
+     пера — те же кнопки, что и в основном toolbar, просто под рукой. Панель
+     живёт поверх листа, двигается за ползунок и встаёт только в узлы сетки:
+     позиций конечное число, поэтому панель не «плавает» на пиксель мимо.
+     Область хода — от левой кромки листа до правой и ниже toolbar; JS считает
+     её по самим панелям, чтобы быстрая палитра не наезжала на них сверху.
+     Положение и свёрнутость переживают перезагрузку (localStorage). */
+  .quickbar {
+    --qb-cell: 38px;
+    position: fixed;
+    z-index: 24;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--tb-pad);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    /* До первой раскладки координат ещё нет — панель не должна мигнуть в углу. */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease, box-shadow 140ms ease, transform 140ms ease;
+  }
+
+  .quickbar.ready {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Приземление после броска: единственная фаза, где координаты едут плавно.
+     Во время перетаскивания transition выключен — иначе панель отстаёт от
+     пальца, а магнит к узлу перестаёт читаться как щелчок. */
+  .quickbar.settling {
+    transition: left 190ms cubic-bezier(0.22, 1, 0.36, 1),
+                top 190ms cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 160ms ease, box-shadow 140ms ease, transform 140ms ease;
+  }
+
+  .quickbar.dragging {
+    box-shadow: 0 26px 60px rgba(0, 0, 0, 0.16), 0 3px 12px rgba(0, 0, 0, 0.07);
+    transform: scale(1.03);
+  }
+
+  /* Ползунок: единственное место, за которое панель тянут. Насечка та же, что
+     у шапки плавающего окна, — жест читается одинаково во всём интерфейсе. */
+  .quick-grip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    /* Ползунок берут пальцем и пером наравне с кнопками, поэтому зона нажатия
+       у него выше самой насечки: тянут за всю полосу, а не за точки. */
+    height: 20px;
+    padding-inline: 3px;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .quickbar.dragging .quick-grip {
+    cursor: grabbing;
+  }
+
+  .quick-grip-dots {
+    flex: 1;
+    height: 9px;
+    background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.15px);
+    background-size: 6px 5px;
+    opacity: 0.75;
+  }
+
+  .quick-fold {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .quick-fold:hover {
+    background: rgba(21, 21, 21, 0.075);
+    color: var(--text);
+  }
+
+  .quick-fold:focus-visible {
+    outline: 2px solid var(--accent-line);
+    outline-offset: 1px;
+  }
+
+  /* Шеврон нарисован двумя гранями квадрата — как «плюс» у стрелки страниц:
+     чётко на любом DPI и скругляется теми же 1.6px, что штрихи иконок. */
+  .quick-chevron {
+    width: 6px;
+    height: 6px;
+    margin-top: 2px;
+    border-left: 1.6px solid currentColor;
+    border-top: 1.6px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .quickbar.folded .quick-chevron {
+    margin-top: -2px;
+    transform: rotate(225deg);
+  }
+
+  /* Свёрнутая панель не исчезает совсем: остаётся пилюля-ползунок — за неё её
+     и возвращают, и двигают дальше. Иначе панель было бы нечем позвать назад. */
+  .quickbar.folded {
+    border-radius: 999px;
+  }
+
+  .quickbar.folded .quick-body {
+    display: none;
+  }
+
+  .quickbar.folded .quick-grip {
+    width: 66px;
+  }
+
+  /* Ряды строго по три ячейки: ластик и маркеры сверху, перья снизу. Наборы
+     свотчей раскрываются в ту же сетку (display: contents), поэтому строка
+     каждого инструмента задаётся явно и не съедет, если цветов вдруг меньше. */
+  .quick-body {
+    display: grid;
+    grid-template-columns: repeat(3, var(--qb-cell));
+    gap: var(--tb-item);
+  }
+
+  .quick-body .swatches {
+    display: contents;
+  }
+
+  .quickbar .quick-body .btn.icon,
+  .quickbar .quick-body .swatch {
+    width: var(--qb-cell);
+    height: var(--qb-cell);
+  }
+
+  #quickEraserBtn {
+    grid-area: 1 / 1;
+  }
+
+  #quickHlColors .swatch {
+    grid-row: 1;
+  }
+
+  #quickPenColors .swatch {
+    grid-row: 2;
+  }
+
+  .quickbar .quick-body .swatch .dot {
+    width: 28px;
+    height: 23px;
+    border-radius: 9px;
+  }
+
+  /* Узлы сетки проступают только на время перетаскивания: пока панель несут,
+     видно, куда именно она может встать, а в покое поле пустое. Точки стоят
+     там, где окажется центр панели, — поэтому и сама сетка выглядит как ряд
+     посадочных мест, а не как разметка под угол корпуса. */
+  .quick-grid-hint {
+    position: fixed;
+    z-index: 23;
+    opacity: 0;
+    pointer-events: none;
+    background-image: radial-gradient(circle, var(--line-strong) 1.6px, transparent 2.1px);
+    transition: opacity 150ms ease;
+  }
+
+  .quick-grid-hint.show {
+    opacity: 0.55;
+  }
+
   /* Резинка листа: пока прокрутку продолжают за конец страницы, лист (и его
      край) отъезжают на --pull, а отпущенный жест возвращает их пружиной. */
   .stage.pulling > canvas,
@@ -986,19 +1171,19 @@
   <header class="toolbar" aria-label="Инструменты доски">
     <div class="group colors pen-colors" aria-label="Цвета ручки">
       <span class="group-label">Перо</span>
-      <div id="penColors" class="swatches"></div>
+      <div id="penColors" class="swatches" data-swatches="pen"></div>
     </div>
 
     <div class="group colors" aria-label="Цвета маркера">
       <span class="group-label">Маркер</span>
-      <div id="hlColors" class="swatches"></div>
+      <div id="hlColors" class="swatches" data-swatches="hl"></div>
     </div>
 
     <div class="group tools" aria-label="Инструменты">
       <button id="lassoBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Лассо" title="Лассо (L)">
         <!--icon:lasso-->
       </button>
-      <button id="eraserBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Ластик" title="Ластик (E)">
+      <button id="eraserBtn" class="btn icon" data-act="eraser" type="button" aria-pressed="false" aria-label="Ластик" title="Ластик (E)">
         <!--icon:eraser-->
       </button>
       <div id="sizes" class="sizes set-start" aria-label="Толщина линии"></div>
@@ -1055,6 +1240,29 @@
       </button>
     </div>
   </nav>
+
+  <!-- Быстрая панель: та же палитра, что в toolbar, но под рукой — плавает над
+       листом, таскается за ползунок и сворачивается в пилюлю. Строки: ластик +
+       два маркера, затем три пера. Кнопки помечены data-атрибутами: tools.js
+       собирает и подсвечивает свотчи сразу во всех панелях по ним. -->
+  <aside id="quickbar" class="quickbar" aria-label="Быстрая панель инструментов">
+    <div id="quickGrip" class="quick-grip" title="Перетащить панель">
+      <span class="quick-grip-dots" aria-hidden="true"></span>
+      <button id="quickFoldBtn" class="quick-fold" type="button" aria-expanded="true" aria-controls="quickBody" aria-label="Свернуть быструю панель" title="Свернуть панель (Q)">
+        <span class="quick-chevron" aria-hidden="true"></span>
+      </button>
+    </div>
+    <div id="quickBody" class="quick-body">
+      <button id="quickEraserBtn" class="btn icon" data-act="eraser" type="button" aria-pressed="false" aria-label="Ластик" title="Ластик (E)">
+        <!--icon:eraser-->
+      </button>
+      <div id="quickHlColors" class="swatches" data-swatches="hl" role="group" aria-label="Цвета маркера"></div>
+      <div id="quickPenColors" class="swatches" data-swatches="pen" role="group" aria-label="Цвета ручки"></div>
+    </div>
+  </aside>
+
+  <!-- Поле посадочных мест быстрой панели: видно только пока её несут. -->
+  <div id="quickGridHint" class="quick-grid-hint" aria-hidden="true"></div>
 
   <div id="pageHint" class="page-hint" aria-hidden="true">
     <!--icon:page-hint-->

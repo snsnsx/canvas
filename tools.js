@@ -25,6 +25,16 @@ const WHEEL_GAP  = 120;   // пауза, разделяющая два прок�
 const RING_LEN   = 2 * Math.PI * 9.4;   // длина кольца индикатора (r=9.4 в разметке)
 const GRAB_HIT   = 17;    // радиус зоны нажатия по «хвату» изображения (сама ручка — r=12)
 
+// --- Быстрая панель ---
+//
+// Панель встаёт только в узлы сетки. Шаг задан в экранных px, а число узлов
+// считается от свободного места, поэтому на любом окне позиции лежат примерно
+// на одном физическом расстоянии друг от друга. Ближе QB_MAGNET доли шага к
+// узлу панель к нему подтягивается, дальше — идёт за пальцем свободно.
+const QB_STEP    = 72;              // желаемое расстояние между узлами (экранные px)
+const QB_MAGNET  = 0.42;            // радиус притяжения к узлу, в долях шага
+const QB_KEY     = 'wb:quickbar';   // положение и свёрнутость (localStorage)
+
 export class ToolManager {
   constructor(storage, renderer, network, history) {
     this.storage = storage;
@@ -95,6 +105,7 @@ export class ToolManager {
     this.buildSwatches();
     this.buildSizes();
     this.syncTools();
+    this.initQuickbar();
 
     // Attach canvas events
     this.overlay.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -134,9 +145,13 @@ export class ToolManager {
     }, { passive: false });
 
     // Buttons
-    document.getElementById('eraserBtn').addEventListener('click', () => {
-      this.storage.tool = 'eraser';
-      this.syncTools();
+    // Ластик есть и в toolbar, и в быстрой панели: обе кнопки помечены
+    // data-act и делают одно и то же.
+    document.querySelectorAll('[data-act="eraser"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.storage.tool = 'eraser';
+        this.syncTools();
+      });
     });
     document.getElementById('lassoBtn').addEventListener('click', () => {
       this.storage.tool = 'lasso';
@@ -226,45 +241,41 @@ export class ToolManager {
 
   // --- Swatches & Size UI Builders ---
 
+  // Цвета живут в одном месте, а показывают их несколько панелей (toolbar и
+  // быстрая палитра), поэтому свотчи собираются сразу во все контейнеры с
+  // соответствующим data-swatches — и остаются одинаковыми во всех.
   buildSwatches() {
-    const penWrap = document.getElementById('penColors');
-    const hlWrap = document.getElementById('hlColors');
-    if (!penWrap || !hlWrap) return;
-
-    penWrap.innerHTML = '';
-    hlWrap.innerHTML = '';
-
-    this.storage.penColors.forEach((c, i) => {
-      const b = document.createElement('button');
-      b.className = 'swatch';
-      b.title = `Ручка — цвет ${i + 1} (удержание — сменить)`;
-      b.setAttribute('aria-label', `Ручка, цвет ${i + 1}`);
-      b.setAttribute('aria-pressed', 'false');
-      b.innerHTML = `<span class="dot" style="background:${c}"></span>`;
-      b.addEventListener('click', () => {
-        this.storage.tool = 'pen';
-        this.storage.penIdx = i;
-        this.syncTools();
+    const sets = [
+      { kind: 'pen', sel: '[data-swatches="pen"]', colors: this.storage.penColors, label: 'Ручка' },
+      { kind: 'highlighter', sel: '[data-swatches="hl"]', colors: this.storage.hlColors, label: 'Маркер' }
+    ];
+    for (const set of sets) {
+      document.querySelectorAll(set.sel).forEach(wrap => {
+        wrap.innerHTML = '';
+        set.colors.forEach((c, i) => wrap.appendChild(this.makeSwatch(set, c, i)));
       });
-      this.attachLongPress(b, () => this.pickColor('pen', i));
-      penWrap.appendChild(b);
-    });
+    }
+  }
 
-    this.storage.hlColors.forEach((c, i) => {
-      const b = document.createElement('button');
-      b.className = 'swatch hl';
-      b.title = `Маркер — цвет ${i + 1} (удержание — сменить)`;
-      b.setAttribute('aria-label', `Маркер, цвет ${i + 1}`);
-      b.setAttribute('aria-pressed', 'false');
-      b.innerHTML = `<span class="dot" style="background:${c}"></span>`;
-      b.addEventListener('click', () => {
-        this.storage.tool = 'highlighter';
-        this.storage.hlIdx = i;
-        this.syncTools();
-      });
-      this.attachLongPress(b, () => this.pickColor('highlighter', i));
-      hlWrap.appendChild(b);
+  makeSwatch({ kind, label }, color, i) {
+    const b = document.createElement('button');
+    b.className = kind === 'pen' ? 'swatch' : 'swatch hl';
+    b.type = 'button';
+    // Номер цвета хранится на самой кнопке: свотчей теперь несколько наборов,
+    // и порядок в общем списке уже не совпадает с индексом цвета.
+    b.dataset.i = i;
+    b.title = `${label} — цвет ${i + 1} (удержание — сменить)`;
+    b.setAttribute('aria-label', `${label}, цвет ${i + 1}`);
+    b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = `<span class="dot" style="background:${color}"></span>`;
+    b.addEventListener('click', () => {
+      this.storage.tool = kind;
+      if (kind === 'pen') this.storage.penIdx = i;
+      else this.storage.hlIdx = i;
+      this.syncTools();
     });
+    this.attachLongPress(b, () => this.pickColor(kind, i));
+    return b;
   }
 
   buildSizes() {
@@ -300,23 +311,22 @@ export class ToolManager {
       this.renderer.lassoPath = null;
       this.renderer.renderOverlay();
     }
-    document.querySelectorAll('#penColors .swatch').forEach((b, i) => {
-      const selected = this.storage.tool === 'pen' && i === this.storage.penIdx;
+    document.querySelectorAll('[data-swatches="pen"] .swatch').forEach(b => {
+      const selected = this.storage.tool === 'pen' && Number(b.dataset.i) === this.storage.penIdx;
       b.classList.toggle('sel', selected);
       b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
-    document.querySelectorAll('#hlColors .swatch').forEach((b, i) => {
-      const selected = this.storage.tool === 'highlighter' && i === this.storage.hlIdx;
+    document.querySelectorAll('[data-swatches="hl"] .swatch').forEach(b => {
+      const selected = this.storage.tool === 'highlighter' && Number(b.dataset.i) === this.storage.hlIdx;
       b.classList.toggle('sel', selected);
       b.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
 
-    const eraserBtn = document.getElementById('eraserBtn');
-    if (eraserBtn) {
+    document.querySelectorAll('[data-act="eraser"]').forEach(btn => {
       const selected = this.storage.tool === 'eraser';
-      eraserBtn.classList.toggle('on', selected);
-      eraserBtn.setAttribute('aria-pressed', selected ? 'true' : 'false');
-    }
+      btn.classList.toggle('on', selected);
+      btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
 
     const lassoBtn = document.getElementById('lassoBtn');
     if (lassoBtn) {
@@ -383,6 +393,206 @@ export class ToolManager {
     inp.click();
   }
 
+  // --- Быстрая панель ---
+  //
+  // Плавающая палитра 3×2 поверх листа: ластик и два маркера, под ними три
+  // пера. Кнопки те же, что в toolbar (их собирает buildSwatches по
+  // data-swatches, подсвечивает syncTools), а своего здесь — только корпус:
+  // перетаскивание за ползунок с посадкой в узлы сетки и сворачивание.
+
+  initQuickbar() {
+    this.qbar = document.getElementById('quickbar');
+    this.qgrip = document.getElementById('quickGrip');
+    this.qhint = document.getElementById('quickGridHint');
+    this.qfold = document.getElementById('quickFoldBtn');
+    if (!this.qbar || !this.qgrip) return;
+
+    this.qdrag = null;
+    this.qpos = this.loadQuickPos();
+    this.qbar.classList.toggle('folded', this.qpos.folded);
+    this.syncQuickFold();
+    this.placeQuick();
+    // Координаты есть — панель можно показывать: до этого она ждала в углу
+    // прозрачной, иначе на каждой загрузке был бы прыжок с места.
+    this.qbar.classList.add('ready');
+
+    this.qgrip.addEventListener('pointerdown', (e) => this.quickDown(e));
+    this.qgrip.addEventListener('pointermove', (e) => this.quickMove(e));
+    this.qgrip.addEventListener('pointerup', (e) => this.quickUp(e));
+    this.qgrip.addEventListener('pointercancel', (e) => this.quickUp(e));
+    this.qfold?.addEventListener('click', () => this.toggleQuickbar());
+
+    // Панель держится за долю поля, а не за пиксели, поэтому её пересаживают
+    // при каждой смене раскладки. Одного resize мало: поле меняется и когда
+    // окно не трогали — первая раскладка страницы, свёрнутый корпус, выросший
+    // toolbar. Наблюдатель ловит всё это по фактическим размерам; сама посадка
+    // меняет только координаты, так что круга «переставили → пересчитали» нет.
+    window.addEventListener('resize', () => this.placeQuick());
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => this.placeQuick());
+      ro.observe(document.documentElement);
+      ro.observe(this.qbar);
+    }
+  }
+
+  // Поле, по которому ходит панель: по бокам — кромки листа (их держат панель
+  // страниц слева и toolbar справа), сверху — под toolbar, снизу — нижнее поле
+  // окна. Меряем по самим панелям, а не повторяем расчёты CSS: поле тогда само
+  // подстраивается под их размер, а быстрая палитра не наезжает на них сверху.
+  quickField() {
+    const w = this.qbar.offsetWidth;
+    const h = this.qbar.offsetHeight;
+    const tb = document.querySelector('.toolbar')?.getBoundingClientRect();
+    const pb = document.getElementById('pagebar')?.getBoundingClientRect();
+    const x0 = pb ? pb.left : 8;
+    const y0 = (tb ? tb.bottom : 44) + 6;
+    const availW = Math.max(0, (tb ? tb.right : window.innerWidth - 8) - w - x0);
+    const availH = Math.max(0, window.innerHeight - 10 - h - y0);
+    // Узлов тем больше, чем больше места, но не меньше двух на ось: даже на
+    // крошечном окне у панели остаётся выбор между краями.
+    const cols = Math.max(2, Math.round(availW / QB_STEP) + 1);
+    const rows = Math.max(2, Math.round(availH / QB_STEP) + 1);
+    return {
+      x0, y0, w, h, cols, rows, availW, availH,
+      stepX: availW / (cols - 1),
+      stepY: availH / (rows - 1)
+    };
+  }
+
+  // Ближайший узел по одной оси. Возвращает и сам узел (at), и «магнитную»
+  // координату (pull) — свободную позицию, подтянутую к узлу тем сильнее, чем
+  // она ближе. На границе притяжения тяга ровно нулевая, поэтому панель под
+  // пальцем не дёргается, а именно прилипает и отлипает.
+  quickSnap(v, origin, step, count) {
+    if (!(step > 0)) return { i: 0, at: origin, pull: origin };
+    const i = Math.min(count - 1, Math.max(0, Math.round((v - origin) / step)));
+    const at = origin + i * step;
+    let k = Math.max(0, 1 - (Math.abs(v - at) / step) / QB_MAGNET);
+    k = k * k * (3 - 2 * k);
+    return { i, at, pull: v + (at - v) * k };
+  }
+
+  // Ставим панель в узел, ближайший к сохранённой доле поля. Хранятся именно
+  // доли, а не пиксели: после смены размера окна панель остаётся там же по
+  // смыслу и снова садится ровно в узел.
+  placeQuick() {
+    if (!this.qbar || this.qdrag) return;
+    const f = this.quickField();
+    const sx = this.quickSnap(f.x0 + this.qpos.fx * f.availW, f.x0, f.stepX, f.cols);
+    const sy = this.quickSnap(f.y0 + this.qpos.fy * f.availH, f.y0, f.stepY, f.rows);
+    this.qbar.style.left = `${Math.round(sx.at)}px`;
+    this.qbar.style.top = `${Math.round(sy.at)}px`;
+  }
+
+  quickDown(e) {
+    if (e.button > 0 || e.target.closest('.quick-fold')) return;
+    e.preventDefault();
+    const box = this.qbar.getBoundingClientRect();
+    this.qdrag = {
+      pid: e.pointerId,
+      dx: e.clientX - box.left,
+      dy: e.clientY - box.top,
+      fx: this.qpos.fx,
+      fy: this.qpos.fy
+    };
+    try { this.qgrip.setPointerCapture(e.pointerId); } catch (_) {}
+    // Пока панель несут, координаты меняются без transition: иначе корпус
+    // отстаёт от пальца и магнит перестаёт читаться как щелчок по узлу.
+    this.qbar.classList.remove('settling');
+    this.qbar.classList.add('dragging');
+    this.showQuickGrid(this.quickField());
+  }
+
+  quickMove(e) {
+    const d = this.qdrag;
+    if (!d || d.pid !== e.pointerId) return;
+    const f = this.quickField();
+    const gx = Math.min(f.x0 + f.availW, Math.max(f.x0, e.clientX - d.dx));
+    const gy = Math.min(f.y0 + f.availH, Math.max(f.y0, e.clientY - d.dy));
+    const sx = this.quickSnap(gx, f.x0, f.stepX, f.cols);
+    const sy = this.quickSnap(gy, f.y0, f.stepY, f.rows);
+    this.qbar.style.left = `${Math.round(sx.pull)}px`;
+    this.qbar.style.top = `${Math.round(sy.pull)}px`;
+    d.fx = f.availW ? (sx.at - f.x0) / f.availW : 0;
+    d.fy = f.availH ? (sy.at - f.y0) / f.availH : 0;
+  }
+
+  quickUp(e) {
+    const d = this.qdrag;
+    if (!d || d.pid !== e.pointerId) return;
+    this.qdrag = null;
+    try { this.qgrip.releasePointerCapture(e.pointerId); } catch (_) {}
+    this.qbar.classList.remove('dragging');
+    this.qbar.classList.add('settling');
+    this.hideQuickGrid();
+    this.qpos.fx = d.fx;
+    this.qpos.fy = d.fy;
+    this.placeQuick();     // отпустили между узлами — панель доезжает сама
+    this.saveQuickPos();
+  }
+
+  // Поле посадочных мест. Точка стоит в центре тайла размером в шаг сетки,
+  // а сам тайл сдвинут на половину шага, поэтому точки попадают ровно туда,
+  // где окажется центр панели, — включая крайние узлы.
+  showQuickGrid(f) {
+    const el = this.qhint;
+    if (!el || !(f.stepX > 0) || !(f.stepY > 0)) return;
+    el.style.left = `${f.x0 + f.w / 2 - f.stepX / 2}px`;
+    el.style.top = `${f.y0 + f.h / 2 - f.stepY / 2}px`;
+    el.style.width = `${f.availW + f.stepX}px`;
+    el.style.height = `${f.availH + f.stepY}px`;
+    el.style.backgroundSize = `${f.stepX}px ${f.stepY}px`;
+    el.classList.add('show');
+  }
+
+  hideQuickGrid() {
+    this.qhint?.classList.remove('show');
+  }
+
+  toggleQuickbar() {
+    if (!this.qbar) return;
+    this.qpos.folded = !this.qpos.folded;
+    this.qbar.classList.toggle('folded', this.qpos.folded);
+    this.syncQuickFold();
+    // Габарит панели изменился, а с ним и поле её хода: пересаживаем корпус
+    // в узел заново, иначе свёрнутая пилюля осталась бы стоять по углу
+    // развёрнутой панели.
+    this.qbar.classList.add('settling');
+    this.placeQuick();
+    this.saveQuickPos();
+  }
+
+  syncQuickFold() {
+    if (!this.qfold) return;
+    const open = !this.qpos.folded;
+    this.qfold.setAttribute('aria-expanded', open ? 'true' : 'false');
+    this.qfold.setAttribute('aria-label', open ? 'Свернуть быструю панель' : 'Развернуть быструю панель');
+    this.qfold.title = open ? 'Свернуть панель (Q)' : 'Развернуть панель (Q)';
+  }
+
+  // Положение панели — настройка рабочего места, а не содержимое доски,
+  // поэтому живёт в localStorage отдельно от неё и не уходит соседям.
+  loadQuickPos() {
+    const def = { fx: 0, fy: 0.62, folded: false };
+    try {
+      const o = JSON.parse(localStorage.getItem(QB_KEY) || 'null');
+      if (!o || typeof o !== 'object') return def;
+      return {
+        fx: Number.isFinite(o.fx) ? Math.min(1, Math.max(0, o.fx)) : def.fx,
+        fy: Number.isFinite(o.fy) ? Math.min(1, Math.max(0, o.fy)) : def.fy,
+        folded: !!o.folded
+      };
+    } catch (_) {
+      return def;
+    }
+  }
+
+  saveQuickPos() {
+    try {
+      localStorage.setItem(QB_KEY, JSON.stringify(this.qpos));
+    } catch (_) {}
+  }
+
   // --- Keyboard Shortcuts ---
 
   onKeyDown(e) {
@@ -420,6 +630,7 @@ export class ToolManager {
       case 'p': this.storage.tool = 'pen'; this.syncTools(); break;
       case 'h': this.storage.tool = 'highlighter'; this.syncTools(); break;
       case 'e': this.storage.tool = 'eraser'; this.syncTools(); break;
+      case 'q': this.toggleQuickbar(); break;
       case 'l':
         this.storage.tool = 'lasso';
         this.storage.selected = null;
@@ -1654,7 +1865,7 @@ export class ToolManager {
     this.network.send({ type: 'addPage', payload: { pageId: newId, afterId } });
     this.enterPage(newId);
     this.animatePageSwitch(1);
-    this.network.showToast(`Добавлена страница ${this.storage.currentPageIndex() + 1} из ${this.storage.pages.length}`);
+    this.network.showToast(`Добавлена страница ${this.storage.currentPageIndex() + 1}`);
   }
 
   // Удаление без переспроса: корзина срабатывает сразу. Единственный лист в
@@ -1694,7 +1905,8 @@ export class ToolManager {
   initPressFx() {
     const bars = [
       document.querySelector('.toolbar'),
-      document.getElementById('pagebar')
+      document.getElementById('pagebar'),
+      document.getElementById('quickbar')
     ].filter(Boolean);
     const onPress = (e) => {
       const btn = e.target.closest('.btn, .swatch, .size, .presence');
