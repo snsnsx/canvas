@@ -2,6 +2,12 @@ import { decodePoints, normalizeNote, normalizeNoteStroke } from './storage.js';
 
 const EPHEMERAL_TYPES = new Set(['cursorMove', 'cursorLeave']);
 
+// Сообщения разговора приходят от сервера и доски не касаются: их разбирает
+// voice.js, а не handleRemoteMessage. Поля «client» в них нет намеренно — иначе
+// фильтр своих сообщений ниже съедал бы сигналинг между двумя вкладками с
+// одинаковым clientId (sessionStorage копируется в дублированную вкладку).
+const VOICE_TYPES = new Set(['voiceWelcome', 'voiceRoster', 'voiceSignal', 'voiceFull']);
+
 // Автопереход на чужой лист: участник ушёл на другую страницу и начал там
 // писать — остальные переходят за ним. COOLDOWN гасит «пинг-понг», когда двое
 // одновременно пишут на разных листах. PAUSE — время, на которое собственное
@@ -17,6 +23,9 @@ export class NetworkManager {
     this.onRemoteFocus = onRemoteFocus;
     this.onRemoteCursor = null;
     this.onRemotePage = null;
+    // Разговор подключается теми же хуками, что и курсоры с листами.
+    this.onVoiceMessage = null;
+    this.onSocketOpen = null;
 
     this.socket = null;
     this.reconnectTimer = null;
@@ -154,6 +163,9 @@ export class NetworkManager {
       }
       // On reconnect, catch up state to ensure we are 100% in sync
       this.loadInitialState();
+      // Разговор переживает обрыв сокета: медиа идёт мимо сигналинга. Но заново
+      // представиться серверу и вернуться в состав нужно — этим займётся voice.js.
+      if (this.onSocketOpen) this.onSocketOpen();
     };
 
     this.socket.onmessage = (event) => {
@@ -213,6 +225,21 @@ export class NetworkManager {
       timestamp: Date.now(),
       ...msg
     }));
+  }
+
+  // Сигналинг разговора. От sendEphemeral отличается тем, что сообщает, ушло ли
+  // сообщение: потерянный offer надо переиграть, а не молча забыть. Очередь тут
+  // вредна — SDP протухает за секунды, а накопленные ICE-кандидаты после
+  // переподключения относились бы уже к мёртвой сессии.
+  sendVoice(msg) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({
+      board: this.storage.boardId,
+      client: this.storage.clientId,
+      timestamp: Date.now(),
+      ...msg
+    }));
+    return true;
   }
 
   sendCursor(point) {
@@ -386,6 +413,13 @@ export class NetworkManager {
   // --- Handling Remote Operations ---
 
   handleRemoteMessage(msg) {
+    if (VOICE_TYPES.has(msg.type)) {
+      // return, а не break: у switch ниже нет ветки default, поэтому любой
+      // неопознанный тип доходит до onMessageReceived() в конце метода — это
+      // была бы полная перерисовка холста на каждый ICE-кандидат.
+      if (this.onVoiceMessage) this.onVoiceMessage(msg);
+      return;
+    }
     if (EPHEMERAL_TYPES.has(msg.type)) {
       if (msg.type === 'cursorMove' && !this.remoteWritingClients.has(msg.client)) {
         const payload = msg.payload || {};

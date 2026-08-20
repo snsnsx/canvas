@@ -251,7 +251,9 @@
   .group.colors { --tb-slack: var(--tb-slack-dot); }
   .group.pen-colors { --tb-slack: var(--tb-slack-pen); }
   .group.tools { --tb-slack-end: var(--tb-slack-dot); }  /* справа — «размеры» */
-  .group.status { --tb-slack: 0px; }
+  /* Слева у группы по-прежнему залитая пилюля (воздуха внутри тап-цели нет),
+     справа теперь иконка — края считаются раздельно, как у .group.tools. */
+  .group.status { --tb-slack: 0px; --tb-slack-end: var(--tb-slack-icon); }
 
   /* Крайние группы прижимаются к корпусу панели, а не к соседу, поэтому у них
      внешний отступ считается от --tb-edge, а не от --tb-group. */
@@ -509,6 +511,129 @@
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 0 4px rgba(16, 163, 127, 0.12);
+  }
+
+  /* --- Разговор --------------------------------------------------------- */
+
+  /* .btn задаёт display: inline-grid — авторское правило перебивает hidden из
+     таблицы браузера, и микрофон остался бы виден вне разговора. */
+  .btn[hidden] {
+    display: none;
+  }
+
+  /* Две иконки в одной ячейке грида: состояние переключается классом, а не
+     переписыванием разметки — метка <!--icon:...--> подставляется один раз, и
+     градиенты внутри неё не задваиваются. */
+  .btn.icon > .ico {
+    grid-area: 1 / 1;
+    display: block;
+  }
+
+  #callBtn .ico-call-end,
+  #micBtn .ico-mic-off {
+    display: none;
+  }
+
+  #callBtn.on .ico-call {
+    display: none;
+  }
+
+  #callBtn.on .ico-call-end {
+    display: block;
+  }
+
+  #micBtn.muted .ico-mic {
+    display: none;
+  }
+
+  #micBtn.muted .ico-mic-off {
+    display: block;
+  }
+
+  /* Кольцо вокруг микрофона — уровень собственного сигнала. Главный вопрос
+     любого разговора «меня слышно?» отвечается ещё до того, как его задали.
+     --lvl пишется инлайном пятнадцать раз в секунду: непрерывный сигнал в
+     CSS-переход не укладывается, его ведут покадрово из JS, а короткий
+     transition только сглаживает ступеньки. */
+  .voice-mic {
+    position: relative;
+  }
+
+  .voice-mic .voice-ring {
+    position: absolute;
+    inset: 3px;
+    border-radius: 999px;
+    box-shadow: 0 0 0 var(--lvl, 0px) rgba(16, 163, 127, 0.18);
+    transition: box-shadow 90ms linear;
+    pointer-events: none;
+  }
+
+  /* Разговор идёт, а меня в нём нет: медленный ореол — приглашение, не тревога. */
+  @keyframes voice-live {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(16, 163, 127, 0.30); }
+    60%      { box-shadow: 0 0 0 7px rgba(16, 163, 127, 0); }
+  }
+
+  #callBtn.live:not(.on) {
+    border-radius: 999px;
+    animation: voice-live 2.2s ease-out infinite;
+  }
+
+  #callBtn.pending {
+    cursor: default;
+  }
+
+  .voice-dots {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  /* Цвет точки — цвет курсора того же человека (--peer ставит voice.js). */
+  .voice-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--peer, var(--accent));
+    box-shadow: 0 0 0 var(--lvl, 0px) var(--peer-soft, rgba(16, 163, 127, 0.30));
+    transition: box-shadow 90ms linear, opacity 140ms ease;
+  }
+
+  /* Замолчал — заливка; выключил микрофон — только контур. «Звука нет вовсе»
+     обязано читаться иначе, чем «сейчас молчит». */
+  .voice-dot.muted {
+    background: transparent;
+    box-shadow: inset 0 0 0 2px var(--peer, var(--accent));
+  }
+
+  .voice-dot.away {
+    opacity: 0.34;
+  }
+
+  .voice-dot.lost {
+    background: transparent;
+    box-shadow: inset 0 0 0 2px var(--danger);
+  }
+
+  .voice-more {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Единственная бесконечная анимация в проекте — и единственное место, где
+     уважение к системной настройке движения обязательно. */
+  @media (prefers-reduced-motion: reduce) {
+    #callBtn.live:not(.on) {
+      animation: none;
+      box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.28);
+    }
+
+    .voice-dot,
+    .voice-mic .voice-ring {
+      transition: none;
+    }
   }
 
   .vbar {
@@ -1135,6 +1260,12 @@
       font-size: 12px;
     }
 
+    /* На узком экране в тулбаре дорога каждая точка: показываем троих, остальные
+       сворачиваются в «+N» — счётчик их и посчитает. */
+    .voice-dots .voice-dot:nth-child(n+4) {
+      display: none;
+    }
+
     /* На узких экранах уводим панель страниц вниз-влево, чтобы не пересекаться
        с основным toolbar сверху. */
     .pagebar {
@@ -1219,6 +1350,23 @@
         <span id="userCount">0</span>
         <span class="sr-only">онлайн</span>
       </button>
+      <!-- Точки участников разговора: цвет тот же, что у курсора этого человека,
+           — кто рисует и кого слышно читается одним взглядом. Живой регион здесь
+           был бы невыносим (пульс на каждое слово), поэтому изменения состава
+           уходят в #voiceStatus. -->
+      <div id="voiceDots" class="voice-dots set-start" aria-hidden="true" hidden></div>
+      <button id="micBtn" class="btn icon voice-mic" type="button" aria-pressed="false"
+              aria-label="Выключить микрофон" title="Выключить микрофон (M)" hidden>
+        <span class="voice-ring" aria-hidden="true"></span>
+        <span class="ico ico-mic"><!--icon:mic--></span>
+        <span class="ico ico-mic-off"><!--icon:mic-off--></span>
+      </button>
+      <button id="callBtn" class="btn icon" type="button" aria-pressed="false"
+              aria-label="Начать разговор" title="Начать разговор">
+        <span class="ico ico-call"><!--icon:call--></span>
+        <span class="ico ico-call-end"><!--icon:call-end--></span>
+      </button>
+      <span id="voiceStatus" class="sr-only" role="status" aria-live="polite"></span>
     </div>
   </header>
 
@@ -1270,6 +1418,9 @@
   </div>
 
   <input id="fileInput" class="sr-only" type="file" accept="image/*">
+  <!-- Приёмники удалённого звука. Именно .sr-only, а не display:none: скрытый
+       через display аудиоэлемент часть браузеров перестаёт играть. -->
+  <div id="voiceSinks" class="sr-only" aria-hidden="true"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- Заготовка плавающего окна: разметка живёт здесь (и иконка подставляется
@@ -1295,6 +1446,7 @@ import { NetworkManager } from './network.js';
 import { HistoryManager } from './history.js';
 import { ToolManager } from './tools.js';
 import { NotesManager } from './notes.js';
+import { VoiceManager } from './voice.js';
 
 (function() {
   "use strict";
@@ -1318,12 +1470,26 @@ import { NotesManager } from './notes.js';
   const notes = new NotesManager(storage, renderer, network, history, tools);
   // Участник ушёл на другой лист и начал там писать — уводим за ним остальных.
   network.onRemotePage = (pageId, point) => tools.followRemotePage(pageId, point);
-  document.getElementById('presenceBtn')?.addEventListener('click', () => window.location.reload());
+
+  // Разговор поверх доски: свой полносвязный меш, но сигналинг едет тем же
+  // сокетом и мимо состояния доски. Подключается ДО network.init(): состав
+  // разговора приходит сразу за presence, ещё до первого нарисованного штриха.
+  const voice = new VoiceManager(storage, network, renderer);
+  network.onVoiceMessage = (msg) => voice.handleMessage(msg);
+  network.onSocketOpen = () => voice.onSocketOpen();
+  voice.init();
+
+  document.getElementById('presenceBtn')?.addEventListener('click', () => {
+    // Во время разговора перезагрузка обрывает связь всем, кто нас слушает, —
+    // просим подтвердить вторым нажатием.
+    if (voice.guardReload()) return;
+    window.location.reload();
+  });
 
   network.init();
 
   // Expose globally for testing/debugging
-  window._board = { storage, renderer, network, history, tools, notes };
+  window._board = { storage, renderer, network, history, tools, notes, voice };
 })();
 </script>
 </body>

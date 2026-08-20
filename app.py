@@ -8,6 +8,8 @@ import re
 import json
 import time
 import hashlib
+import hmac
+import base64
 import asyncio
 from typing import Dict, Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
@@ -24,6 +26,17 @@ os.makedirs(BOARDS, exist_ok=True)
 # Имя доски: латиница/цифры/подчёркивание/дефис, до 64 символов.
 SAFE_ID = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 EPHEMERAL_WS_TYPES = {"cursorMove", "cursorLeave"}
+# Сигналинг разговора. Отдельный набор, а не расширение эфемерного: тот путь
+# рассылает кадр всем подряд, а offer/answer/ICE адресные — и по объёму (SDP
+# в единицы килобайт на пару), и по приватности: в ICE-кандидатах лежат
+# локальные и внешние адреса, и знать их тем, кто в разговоре не участвует,
+# незачем.
+#
+# Класть их на общий путь нельзя тем более: там state.version растёт на КАЖДОМ
+# сообщении, версия — ключ кэша snapshot() и ETag, а schedule_save после этого
+# переписывает весь JSON доски. При этом apply_operation промолчала бы: в её
+# цепочке if/elif нет ветки else — поломка была бы полностью невидимой.
+VOICE_WS_TYPES = {"voiceHello", "voiceJoin", "voiceLeave", "voiceMute", "voiceSignal"}
 DEFAULT_PAGE_ID = "page-1"   # id первой/легаси-страницы (совпадает с фронтендом)
 
 # Ограничения защиты и обслуживания памяти.
@@ -35,6 +48,47 @@ PAGE_MAX_H = 8000.0                # предел размера окна по �
 SAVE_MAX_DELAY = 15.0              # доска сохраняется не реже, чем раз в 15 с активности
 BOARD_IDLE_TTL = 600.0             # доска без клиентов выгружается из памяти через 10 мин
 SEND_TIMEOUT = 5.0                 # медленный клиент не должен держать рассылку
+
+# Разговор идёт полносвязным мешем: у каждого участника N-1 соединений и N-1
+# кодировщиков Opus. На шестерых это 15 соединений на доску и примерно 200
+# кбит/с отдачи с каждого — дальше начинает захлёбываться мобильный процессор,
+# поэтому предел проверяется на сервере: проверка на клиенте проиграла бы гонку
+# одновременным входам.
+VOICE_MAX_MEMBERS = 6
+MAX_SIGNAL_MESSAGE = 64 * 1024     # SDP — единицы килобайт; крупнее не пропускаем
+
+# ICE-серверы. STUN хватает в одной сети и за обычным NAT; за симметричным NAT
+# и корпоративным файрволом нужен TURN, поэтому его адрес и секрет берутся из
+# окружения и в репозиторий не попадают.
+VOICE_STUN = [u.strip() for u in os.environ.get(
+    "VOICE_STUN_URLS",
+    "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302").split(",") if u.strip()]
+VOICE_TURN = [u.strip() for u in os.environ.get("VOICE_TURN_URLS", "").split(",") if u.strip()]
+VOICE_TURN_SECRET = os.environ.get("VOICE_TURN_SECRET", "")   # coturn use-auth-secret
+VOICE_TURN_USER = os.environ.get("VOICE_TURN_USER", "")
+VOICE_TURN_PASS = os.environ.get("VOICE_TURN_PASS", "")
+VOICE_TURN_TTL = int(os.environ.get("VOICE_TURN_TTL", "3600"))
+
+
+def voice_ice_config(voice_id: str) -> dict:
+    """Конфигурация ICE для одного участника.
+
+    Учётки TURN временные (схема coturn use-auth-secret): логин — «срок:кто»,
+    пароль — HMAC от логина. Секрет не покидает сервер, а утёкшая пара протухает
+    через VOICE_TURN_TTL.
+    """
+    servers = []
+    if VOICE_STUN:
+        servers.append({"urls": VOICE_STUN})
+    if VOICE_TURN:
+        if VOICE_TURN_SECRET:
+            username = f"{int(time.time()) + VOICE_TURN_TTL}:{voice_id}"
+            cred = base64.b64encode(hmac.new(VOICE_TURN_SECRET.encode(),
+                                             username.encode(), hashlib.sha1).digest()).decode()
+        else:
+            username, cred = VOICE_TURN_USER, VOICE_TURN_PASS
+        servers.append({"urls": VOICE_TURN, "username": username, "credential": cred})
+    return {"iceServers": servers, "hasTurn": bool(VOICE_TURN)}
 
 app = FastAPI()
 
@@ -497,6 +551,9 @@ class BoardManager:
     def __init__(self):
         self.boards: Dict[str, dict] = {}  # board_id -> { "clients": set, "state": BoardState, "save_task": Task }
         self.lock = asyncio.Lock()
+        # Ссылки на фоновые задачи досылки состава разговора: без них сборщик
+        # мусора может собрать задачу до того, как она выполнится.
+        self._tasks: Set[asyncio.Task] = set()
 
     async def get_board(self, board_id: str) -> BoardState:
         async with self.lock:
@@ -512,6 +569,13 @@ class BoardManager:
                         print(f"Error loading board {board_id}: {e}")
                 self.boards[board_id] = {
                     "clients": set(),
+                    # voiceId -> WebSocket: адресная доставка сигналинга.
+                    # Заполняется по voiceHello, то есть только для тех, кто
+                    # действительно вошёл в разговор.
+                    "peers": {},
+                    # voiceId -> {"client": str, "muted": bool}: состав разговора.
+                    "call": {},
+                    "call_rev": 0,
                     "state": state,
                     "save_task": None,
                     "save_deadline": 0.0,
@@ -528,12 +592,20 @@ class BoardManager:
     async def disconnect(self, board_id: str, websocket: WebSocket):
         async with self.lock:
             if board_id in self.boards:
-                self.boards[board_id]["clients"].discard(websocket)
+                board = self.boards[board_id]
+                board["clients"].discard(websocket)
+                # Привязку voiceId снимаем на всякий случай: состав разговора к
+                # этому моменту уже разослан voice_detach().
+                vid = getattr(websocket.state, "voice_id", None)
+                if vid and board["peers"].get(vid) is websocket:
+                    del board["peers"][vid]
                 # If no clients left, flush saving immediately
-                if not self.boards[board_id]["clients"]:
-                    if self.boards[board_id]["save_task"]:
-                        self.boards[board_id]["save_task"].cancel()
-                        self.boards[board_id]["save_task"] = None
+                if not board["clients"]:
+                    board["peers"].clear()
+                    board["call"].clear()
+                    if board["save_task"]:
+                        board["save_task"].cancel()
+                        board["save_task"] = None
                     await self.save_board_to_disk(board_id)
 
     async def broadcast(self, board_id: str, message: dict, exclude: WebSocket = None,
@@ -576,11 +648,28 @@ class BoardManager:
             return
         dead = [r for r in results if r is not None and not isinstance(r, BaseException)]
         if dead:
+            roster = None
             async with self.lock:
                 board = self.boards.get(board_id)
                 if board is not None:
+                    lost = []
                     for ws in dead:
                         board["clients"].discard(ws)
+                        # Сокет умер мимо disconnect() — снимаем и голосовую
+                        # запись, иначе участник навсегда зависнет в составе, а
+                        # адресная доставка будет уходить в никуда.
+                        vid = getattr(ws.state, "voice_id", None)
+                        if vid and self._voice_forget_locked(board, vid, ws):
+                            lost.append(vid)
+                    if lost:
+                        board["call_rev"] += 1
+                        roster = self.voice_roster(board_id, lost=lost)
+            if roster is not None:
+                # Звать broadcast изнутри broadcast нельзя — лок не
+                # реентерабельный; досылаем отдельной задачей.
+                task = asyncio.create_task(self.broadcast(board_id, roster))
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
 
     async def presence_count(self, board_id: str) -> int:
         # Число подключённых сокетов доски (прокси числа участников онлайн).
@@ -594,6 +683,206 @@ class BoardManager:
         # (включая отправителя — ему тоже нужно показать число).
         count = await self.presence_count(board_id)
         await self.broadcast(board_id, {"type": "presence", "count": count})
+
+    # --- Голосовой разговор ------------------------------------------------
+    # Состав разговора ведёт сервер: клиент его не сочиняет, а применяет. Любое
+    # сообщение о составе — это полный список, поэтому повторная доставка и
+    # переподключение безопасны.
+    #
+    # Сообщения о составе НИКОГДА не содержат поля "client": клиент отбрасывает
+    # сообщения со своим clientId (network.js), и вошедший не увидел бы
+    # собственный состав, то есть не набрал бы никого. Ровно по этой причине так
+    # же устроен presence выше.
+    #
+    # asyncio.Lock не реентерабельный, а broadcast() берёт его сам при неудачной
+    # отправке. Поэтому каждый помощник ниже собирает сообщение ПОД локом и
+    # возвращает его, а рассылает уже вызывающий — после освобождения.
+
+    def voice_roster(self, board_id: str, left=None, lost=None):
+        """Сообщение о составе разговора. Без await — лок не нужен."""
+        board = self.boards.get(board_id)
+        if board is None:
+            return None
+        members = [{"id": vid, "client": rec["client"], "muted": bool(rec["muted"])}
+                   for vid, rec in sorted(board["call"].items())]
+        msg = {"type": "voiceRoster", "rev": board["call_rev"], "members": members}
+        if left:
+            msg["left"] = list(left)
+        if lost:
+            msg["lost"] = list(lost)
+        return msg
+
+    def _voice_forget_locked(self, board: dict, voice_id: str, websocket=None) -> bool:
+        """Снимает участника с учёта. Только под self.lock.
+        Возвращает True, если он был в составе разговора.
+
+        Сверка по идентичности сокета обязательна: переподключившийся клиент уже
+        занял тот же voiceId новым сокетом, и запоздалый disconnect старого не
+        должен снести привязку нового — иначе человек станет недостижим навсегда.
+        """
+        bound = board["peers"].get(voice_id)
+        if websocket is not None and bound is not None and bound is not websocket:
+            return False
+        board["peers"].pop(voice_id, None)
+        return board["call"].pop(voice_id, None) is not None
+
+    async def voice_register(self, board_id: str, voice_id: str, websocket: WebSocket) -> bool:
+        async with self.lock:
+            board = self.boards.get(board_id)
+            if board is None:
+                return False
+            old = getattr(websocket.state, "voice_id", None)
+            if old and old != voice_id and board["peers"].get(old) is websocket:
+                board["peers"].pop(old, None)
+                board["call"].pop(old, None)
+            board["peers"][voice_id] = websocket      # перезапись безусловна
+            websocket.state.voice_id = voice_id
+            return True
+
+    async def voice_detach(self, board_id: str, websocket: WebSocket, clean: bool):
+        """Отвязывает голосовую личность умершего сокета.
+        Возвращает сообщение о составе (рассылать ВНЕ лока) либо None."""
+        async with self.lock:
+            board = self.boards.get(board_id)
+            if board is None:
+                return None
+            vid = getattr(websocket.state, "voice_id", None)
+            if not vid:
+                return None
+            in_call = self._voice_forget_locked(board, vid, websocket)
+            websocket.state.voice_id = None
+            if not in_call:
+                return None
+            board["call_rev"] += 1
+            return self.voice_roster(board_id,
+                                     left=[vid] if clean else None,
+                                     lost=None if clean else [vid])
+
+    async def voice_send(self, board_id: str, voice_id: str, message: dict) -> bool:
+        """Адресная доставка одному участнику разговора."""
+        board = self.boards.get(board_id)
+        if board is None:
+            return False
+        ws = board["peers"].get(voice_id)     # без await — читать без лока безопасно
+        if ws is None:
+            return False
+        payload = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
+        try:
+            await asyncio.wait_for(ws.send_text(payload), timeout=SEND_TIMEOUT)
+            return True
+        except Exception:
+            roster = None
+            async with self.lock:
+                board = self.boards.get(board_id)
+                if board is not None:
+                    board["clients"].discard(ws)
+                    if self._voice_forget_locked(board, voice_id, ws):
+                        board["call_rev"] += 1
+                        roster = self.voice_roster(board_id, lost=[voice_id])
+            if roster is not None:
+                await self.broadcast(board_id, roster)
+            return False
+
+    async def voice_send_snapshot(self, board_id: str, websocket: WebSocket):
+        """Свежему сокету — текущий состав разговора. Без этого кнопка вызова не
+        загорится у того, кто открыл доску уже во время разговора."""
+        msg = self.voice_roster(board_id)
+        if msg is None or not msg["members"]:
+            return
+        try:
+            await asyncio.wait_for(
+                websocket.send_text(json.dumps(msg, ensure_ascii=False, separators=(",", ":"))),
+                timeout=SEND_TIMEOUT)
+        except Exception:
+            pass
+
+    async def voice_join(self, board_id: str, voice_id: str, client_id: str, muted: bool):
+        """Возвращает (сообщение_всем, сообщение_лично)."""
+        async with self.lock:
+            board = self.boards.get(board_id)
+            if board is None:
+                return None, None
+            call = board["call"]
+            rec = call.get(voice_id)
+            if rec is None:
+                if len(call) >= VOICE_MAX_MEMBERS:
+                    return None, {"type": "voiceFull", "limit": VOICE_MAX_MEMBERS}
+                rec = {"client": client_id, "muted": False}
+                call[voice_id] = rec
+            rec["client"] = client_id
+            rec["muted"] = bool(muted)
+            board["call_rev"] += 1
+            return self.voice_roster(board_id), None
+
+    async def voice_leave(self, board_id: str, voice_id: str):
+        async with self.lock:
+            board = self.boards.get(board_id)
+            if board is None or board["call"].pop(voice_id, None) is None:
+                return None
+            board["call_rev"] += 1
+            return self.voice_roster(board_id, left=[voice_id])
+
+    async def voice_mute(self, board_id: str, voice_id: str, muted: bool):
+        async with self.lock:
+            board = self.boards.get(board_id)
+            rec = board["call"].get(voice_id) if board else None
+            if rec is None:
+                return None                     # мьют сам по себе в разговор не вводит
+            rec["muted"] = bool(muted)
+            board["call_rev"] += 1
+            return self.voice_roster(board_id)
+
+    async def handle_voice(self, board_id: str, websocket: WebSocket, data: dict):
+        op = data.get("type")
+        vid = data.get("from")
+        if not isinstance(vid, str) or not (1 <= len(vid) <= 96):
+            return
+        cid = data.get("client")
+        cid = cid[:64] if isinstance(cid, str) else ""
+
+        if op == "voiceHello":
+            if not await self.voice_register(board_id, vid, websocket):
+                return
+            snap = self.voice_roster(board_id) or {}
+            await self.voice_send(board_id, vid, {
+                "type": "voiceWelcome",
+                "rev": snap.get("rev", 0),
+                "members": snap.get("members", []),
+                "maxMembers": VOICE_MAX_MEMBERS,
+                "ice": voice_ice_config(vid),
+            })
+            return
+
+        # Дальше — только представившиеся: адресная доставка держится на привязке
+        # voiceId к сокету, а её ставит voiceHello.
+        board = self.boards.get(board_id)
+        if board is None or board["peers"].get(vid) is not websocket:
+            return
+
+        if op == "voiceSignal":
+            to = data.get("to")
+            if not isinstance(to, str) or not to or to == vid:
+                return
+            # Кадр пересобирается, а не ретранслируется как есть: поле "client"
+            # убирается (иначе фильтр своих сообщений на клиенте съел бы сигнал
+            # между двумя вкладками с одинаковым clientId), а "from" ставит
+            # сервер — представиться чужим нельзя.
+            await self.voice_send(board_id, to, {
+                "type": "voiceSignal", "from": vid, "payload": data.get("payload") or {}})
+            return
+
+        payload = data.get("payload") or {}
+        direct = None
+        if op == "voiceJoin":
+            roster, direct = await self.voice_join(board_id, vid, cid, bool(payload.get("muted")))
+        elif op == "voiceLeave":
+            roster = await self.voice_leave(board_id, vid)
+        else:                                   # voiceMute
+            roster = await self.voice_mute(board_id, vid, bool(payload.get("muted")))
+        if direct is not None:
+            await self.voice_send(board_id, vid, direct)
+        if roster is not None:
+            await self.broadcast(board_id, roster)
 
     async def schedule_save(self, board_id: str):
         # Дебаунс перезапускался КАЖДЫМ сообщением, а сообщения при рисовании
@@ -771,6 +1060,14 @@ async def get_tools():
 async def get_notes():
     return FileResponse(os.path.join(BASE, "notes.js"), media_type="application/javascript", headers=JS_HEADERS)
 
+# Строго выше маршрута "/{icon}": тот перехватывает ЛЮБОЙ односегментный путь,
+# а Starlette берёт первое совпадение по порядку регистрации. Ниже этот маршрут
+# был бы мёртвым — доска открывалась бы как обычно, а разговор просто молча
+# отсутствовал.
+@app.get("/voice.js")
+async def get_voice():
+    return FileResponse(os.path.join(BASE, "voice.js"), media_type="application/javascript", headers=JS_HEADERS)
+
 @app.get("/gsap.min.js")
 async def get_gsap():
     return FileResponse(os.path.join(BASE, "gsap.min.js"), media_type="application/javascript")
@@ -827,6 +1124,8 @@ async def websocket_endpoint(websocket: WebSocket, board_id: str):
     # то есть все клиенты всех досок выстраивались в очередь на каждый пакет точек.
     state = await board_manager.get_board(board_id)
     await board_manager.broadcast_presence(board_id)
+    # Свежему клиенту сразу сообщаем, идёт ли на доске разговор.
+    await board_manager.voice_send_snapshot(board_id, websocket)
     try:
         while True:
             raw = await websocket.receive_text()
@@ -842,6 +1141,13 @@ async def websocket_endpoint(websocket: WebSocket, board_id: str):
                 continue
 
             op_type = data.get("type")
+            if op_type in VOICE_WS_TYPES:
+                # ДО инкремента версии: сигналинг — не операция доски. Кадр в
+                # десятки килобайт — это уже не SDP, а попытка прокачать через
+                # доску файл мимо состояния и сохранений.
+                if len(raw) <= MAX_SIGNAL_MESSAGE:
+                    await board_manager.handle_voice(board_id, websocket, data)
+                continue
             if op_type in EPHEMERAL_WS_TYPES:
                 # Эфемерное сообщение ретранслируется как есть — без повторного
                 # кодирования: исходный текст уже готов к отправке.
@@ -861,13 +1167,24 @@ async def websocket_endpoint(websocket: WebSocket, board_id: str):
 
             await board_manager.broadcast(board_id, data, exclude=websocket)
             await board_manager.schedule_save(board_id)
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as exc:
+        # 1000/1001 — вкладку закрыли или перезагрузили: участник ушёл сам, и
+        # соседи рвут соединение сразу. Всё прочее (1006) — обрыв сети: медиа
+        # идёт по ICE мимо сигналинга и в это время не прерывается, поэтому
+        # соседи держат соединение живым ещё пятнадцать секунд (voice.js).
+        clean = getattr(exc, "code", 1006) in (1000, 1001)
+        roster = await board_manager.voice_detach(board_id, websocket, clean)
         await board_manager.disconnect(board_id, websocket)
         await board_manager.broadcast_presence(board_id)
+        if roster is not None:
+            await board_manager.broadcast(board_id, roster)
     except Exception as e:
         print(f"WS Exception on {board_id}: {e}")
+        roster = await board_manager.voice_detach(board_id, websocket, False)
         await board_manager.disconnect(board_id, websocket)
         await board_manager.broadcast_presence(board_id)
+        if roster is not None:
+            await board_manager.broadcast(board_id, roster)
 
 if __name__ == "__main__":
     import uvicorn

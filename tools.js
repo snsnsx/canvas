@@ -1911,7 +1911,13 @@ export class ToolManager {
     const onPress = (e) => {
       const btn = e.target.closest('.btn, .swatch, .size, .presence');
       if (!btn || btn.disabled) return;
-      const inner = btn.querySelector('.m-icon, .dot, .pip') || btn;
+      // У кнопок разговора две иконки в одной ячейке, и скрыта та, что не по
+      // состоянию: берём первую ВИДИМУЮ, иначе пружина досталась бы display:none
+      // и нажатие выглядело бы мёртвым. getClientRects() у скрытой пуст.
+      let inner = btn;
+      for (const el of btn.querySelectorAll('.m-icon, .dot, .pip')) {
+        if (el.getClientRects().length) { inner = el; break; }
+      }
       this.springPop(inner, 0.8, 'tap-pop');
     };
     for (const bar of bars) bar.addEventListener('click', onPress, true);

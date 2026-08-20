@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="i-callend-body" x1="4" y1="8" x2="20" y2="17" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB4AB"/>
+      <stop offset="1" stop-color="#CF2E2E"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 7.4c-3.1 0-6 .86-8.2 2.36-.86.59-1.02 1.8-.35 2.6l1.05 1.24c.5.6 1.36.72 2.02.3l1.72-1.1c.5-.32.8-.87.8-1.46v-.5c1.9-.5 3.9-.5 5.8 0v.5c0 .59.3 1.14.8 1.46l1.72 1.1c.66.42 1.52.3 2.02-.3l1.05-1.24c.67-.8.51-2.01-.35-2.6C18 8.26 15.1 7.4 12 7.4Z" fill="url(#i-callend-body)" class="m-edge"/>
+  <path d="M6.2 10.5A15 15 0 0 1 12 9.2" fill="none" stroke="rgba(255,255,255,.72)" stroke-width="1.15" stroke-linecap="round"/>
+</svg>
