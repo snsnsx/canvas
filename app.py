@@ -37,6 +37,12 @@ EPHEMERAL_WS_TYPES = {"cursorMove", "cursorLeave"}
 # переписывает весь JSON доски. При этом apply_operation промолчала бы: в её
 # цепочке if/elif нет ветки else — поломка была бы полностью невидимой.
 VOICE_WS_TYPES = {"voiceHello", "voiceJoin", "voiceLeave", "voiceMute", "voiceSignal"}
+# Обратное направление: эти типы сочиняет только сервер. Пришедшие от клиента,
+# они попадали бы на общий путь — подняли бы версию доски, вызвали перезапись
+# всего JSON на диск и, главное, были бы ретранслированы остальным как
+# настоящие: одного кадра voiceFull хватило бы, чтобы у всех оборвался
+# разговор, а voiceRoster с огромным rev навсегда заклинил бы состав.
+VOICE_OUT_TYPES = {"voiceWelcome", "voiceRoster", "voiceFull"}
 DEFAULT_PAGE_ID = "page-1"   # id первой/легаси-страницы (совпадает с фронтендом)
 
 # Ограничения защиты и обслуживания памяти.
@@ -55,6 +61,7 @@ SEND_TIMEOUT = 5.0                 # медленный клиент не дол
 # поэтому предел проверяется на сервере: проверка на клиенте проиграла бы гонку
 # одновременным входам.
 VOICE_MAX_MEMBERS = 6
+VOICE_REJOIN_GRACE = 20.0          # столько место ждёт вернувшегося после обрыва
 MAX_SIGNAL_MESSAGE = 64 * 1024     # SDP — единицы килобайт; крупнее не пропускаем
 
 # ICE-серверы. STUN хватает в одной сети и за обычным NAT; за симметричным NAT
@@ -575,6 +582,9 @@ class BoardManager:
                     "peers": {},
                     # voiceId -> {"client": str, "muted": bool}: состав разговора.
                     "call": {},
+                    # voiceId -> до какого момента место придержано за тем, у
+                    # кого аварийно оборвался сокет (см. voice_join).
+                    "reserved": {},
                     "call_rev": 0,
                     "state": state,
                     "save_task": None,
@@ -603,6 +613,7 @@ class BoardManager:
                 if not board["clients"]:
                     board["peers"].clear()
                     board["call"].clear()
+                    board["reserved"].clear()
                     if board["save_task"]:
                         board["save_task"].cancel()
                         board["save_task"] = None
@@ -753,6 +764,14 @@ class BoardManager:
             websocket.state.voice_id = None
             if not in_call:
                 return None
+            if clean:
+                board["reserved"].pop(vid, None)
+            else:
+                # Обрыв сети, а не выход: место придерживаем на то же время, что
+                # соседи держат звук. Без этого при полном разговоре чужой вход
+                # успевал занять освободившийся слот, и вернувшийся через три
+                # секунды участник получал «мест нет» — вылет посреди разговора.
+                board["reserved"][vid] = time.monotonic() + VOICE_REJOIN_GRACE
             board["call_rev"] += 1
             return self.voice_roster(board_id,
                                      left=[vid] if clean else None,
@@ -770,6 +789,13 @@ class BoardManager:
         try:
             await asyncio.wait_for(ws.send_text(payload), timeout=SEND_TIMEOUT)
             return True
+        except asyncio.TimeoutError:
+            # Не уложился в таймаут — это ЕЩЁ НЕ мёртвый сокет, а медленный.
+            # Выписывать его из clients здесь нельзя: он перестал бы получать и
+            # синхронизацию доски тоже, то есть человек молча остался бы с
+            # застывшим листом. Настоящий обрыв заметит его собственный цикл
+            # receive_text и уйдёт штатным путём через disconnect().
+            return False
         except Exception:
             roster = None
             async with self.lock:
@@ -803,9 +829,18 @@ class BoardManager:
             if board is None:
                 return None, None
             call = board["call"]
+            reserved = board["reserved"]
+            now = time.monotonic()
+            for stale in [k for k, exp in reserved.items() if exp <= now]:
+                reserved.pop(stale, None)
             rec = call.get(voice_id)
             if rec is None:
-                if len(call) >= VOICE_MAX_MEMBERS:
+                held = reserved.pop(voice_id, None) is not None
+                # Придержанные места считаются занятыми: иначе слот оборвавшегося
+                # успевал занять посторонний, а вернувшийся входил сверх предела —
+                # и в меше оказывалось семеро вместо шести.
+                taken = len(call) + sum(1 for k in reserved if k not in call)
+                if not held and taken >= VOICE_MAX_MEMBERS:
                     return None, {"type": "voiceFull", "limit": VOICE_MAX_MEMBERS}
                 rec = {"client": client_id, "muted": False}
                 call[voice_id] = rec
@@ -819,6 +854,7 @@ class BoardManager:
             board = self.boards.get(board_id)
             if board is None or board["call"].pop(voice_id, None) is None:
                 return None
+            board["reserved"].pop(voice_id, None)   # ушёл сам — место не держим
             board["call_rev"] += 1
             return self.voice_roster(board_id, left=[voice_id])
 
@@ -862,6 +898,13 @@ class BoardManager:
         if op == "voiceSignal":
             to = data.get("to")
             if not isinstance(to, str) or not to or to == vid:
+                return
+            # Обе стороны обязаны быть В РАЗГОВОРЕ, а не просто представиться.
+            # Иначе любой, кто открыл доску, берёт из состава чужой voiceId,
+            # шлёт туда оффер — и получает в ответ живой микрофон, не показавшись
+            # никому в списке участников.
+            call = board["call"]
+            if vid not in call or to not in call:
                 return
             # Кадр пересобирается, а не ретранслируется как есть: поле "client"
             # убирается (иначе фильтр своих сообщений на клиенте съел бы сигнал
@@ -1141,6 +1184,8 @@ async def websocket_endpoint(websocket: WebSocket, board_id: str):
                 continue
 
             op_type = data.get("type")
+            if op_type in VOICE_OUT_TYPES:
+                continue                    # так представляться может только сервер
             if op_type in VOICE_WS_TYPES:
                 # ДО инкремента версии: сигналинг — не операция доски. Кадр в
                 # десятки килобайт — это уже не SDP, а попытка прокачать через

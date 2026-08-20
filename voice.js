@@ -95,6 +95,9 @@ export class VoiceManager {
     // незаметно включённый микрофон.
     window.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // Зажатая клавиша повторяется системой десятки раз в секунду, а каждый
+      // мьют — это сообщение на сервер и новый состав всем на доске.
+      if (e.repeat) return;
       if (e.target && /input|textarea/i.test(e.target.tagName)) return;
       if ((e.key || '').toLowerCase() !== 'm' || !this.inCall) return;
       e.preventDefault();
@@ -224,7 +227,7 @@ export class VoiceManager {
   }
 
   setMuted(v) {
-    if (!this.inCall) return;
+    if (!this.inCall || !!v === this.muted) return;
     this.muted = !!v;
     // enabled = false отдаёт тишину ВСЕМ потребителям трека (в том числе
     // анализатору, поэтому собственное кольцо гаснет само), не трогает соединение
@@ -241,6 +244,12 @@ export class VoiceManager {
   // ---------- сокет ----------
 
   onSocketOpen() {
+    // Сокет открылся заново — возможно, и сервер перезапустился. Его счётчик
+    // состава тогда начинается с нуля, а наш только растёт: сравнение
+    // «rev <= this.rev» навсегда отбрасывало бы свежие сообщения, и разговор
+    // замирал бы до перезагрузки страницы. Счётчик сравним только внутри одной
+    // жизни соединения, поэтому на каждом открытии сбрасываем его.
+    this.rev = -1;
     if (!this.inCall) return;
     // Соединения НЕ рвём: медиа по ICE переживает обрыв сигналинга, а network.js
     // переподключается каждые три секунды.
@@ -276,10 +285,11 @@ export class VoiceManager {
     this.maxMembers = msg.maxMembers || this.maxMembers;
     this.ice = (msg.ice && Array.isArray(msg.ice.iceServers) && msg.ice.iceServers.length)
       ? msg.ice : FALLBACK_ICE;
-    if (typeof msg.rev === 'number' && msg.rev > this.rev) {
-      this.rev = msg.rev;
-      this.roster = this._toRoster(msg.members);
-    }
+    // Приветствие адресное и приходит прямо в ответ на наш voiceHello, то есть
+    // заведомо свежее всего, что мы видели: принимаем его как истину, а не
+    // сравниваем версии.
+    if (typeof msg.rev === 'number') this.rev = msg.rev;
+    this.roster = this._toRoster(msg.members);
     if (this.joining) {
       this.joining = false;
       this._sendJoin();
@@ -288,20 +298,24 @@ export class VoiceManager {
   }
 
   _onRoster(msg) {
-    // rev монотонен: сокет попадает в рассылку РАНЬШЕ, чем ему уходит личный
-    // снимок состава, поэтому дельта может обогнать снимок — устаревшее
-    // сообщение просто игнорируем.
-    if (typeof msg.rev === 'number') {
-      if (msg.rev <= this.rev) return;
-      this.rev = msg.rev;
-    }
     const now = Date.now();
+    // Пометку «сосед пропал аварийно» ставим ДО проверки версии. Она
+    // идемпотентна, а потерять её нельзя: сообщения приходят не строго по
+    // порядку (личный снимок состава уходит уже после того, как сокет попал в
+    // общую рассылку), и отброшенное по версии сообщение унесло бы с собой
+    // льготное время — соседа снесли бы мгновенно вместе с работающим звуком.
     for (const id of msg.lost || []) {
       const p = this.peers.get(id);
       // У соседа умер сокет, но соединение по ICE ещё живо: рвать звук из-за
       // трёхсекундного обрыва сигналинга нельзя — ждём его возвращения.
       if (p) { p.orphanUntil = now + ORPHAN_GRACE; p.state = 'away'; }
     }
+    // rev монотонен внутри жизни соединения: устаревший снимок игнорируем.
+    if (typeof msg.rev === 'number') {
+      if (msg.rev <= this.rev) return;
+      this.rev = msg.rev;
+    }
+    // А вот снос по left необратим, поэтому только после проверки версии.
     for (const id of msg.left || []) this._dropPeer(id);
 
     const prev = this.roster;
@@ -309,16 +323,38 @@ export class VoiceManager {
     this.roster = next;
 
     if (this.inCall && next.has(this.selfId)) {
+      // Тех, у кого просто оборвался сигналинг, в «пришёл/ушёл» не считаем:
+      // человек никуда не делся, его слышно, и через три секунды он вернётся.
+      // Иначе один блип выглядел бы как «Участник вышел» и сразу «Участник
+      // присоединился» — два ложных сообщения на ровном месте.
+      const blip = (id) => { const p = this.peers.get(id); return !!(p && p.orphanUntil && now < p.orphanUntil); };
       let joined = 0, gone = 0;
-      for (const id of next.keys()) if (id !== this.selfId && !prev.has(id)) joined++;
-      for (const id of prev.keys()) if (id !== this.selfId && !next.has(id)) gone++;
-      const n = next.size;
+      for (const id of next.keys()) if (id !== this.selfId && !prev.has(id) && !blip(id)) joined++;
+      for (const id of prev.keys()) if (id !== this.selfId && !next.has(id) && !blip(id)) gone++;
+      const n = this._memberCount();
       if (joined) this._toast(`Участник присоединился · всего ${n}`);
       else if (gone) this._toast(`Участник вышел · всего ${n}`);
     } else if (!this.inCall && !prev.size && next.size) {
       this._toast(`Идёт разговор · ${next.size} ${pluralMembers(next.size)}`);
     }
     this._reconcile();
+  }
+
+  // Участники разговора глазами интерфейса: состав плюс те, у кого сигналинг
+  // оборвался, но звук ещё идёт. Сервер о вторых уже не знает, а слышно их
+  // по-прежнему — и в счётчике они обязаны оставаться.
+  _visibleIds() {
+    const now = Date.now();
+    const ids = [...this.roster.keys()].filter(id => id !== this.selfId);
+    for (const [id, p] of this.peers) {
+      if (id === this.selfId || this.roster.has(id)) continue;
+      if (p.orphanUntil && now < p.orphanUntil) ids.push(id);
+    }
+    return ids;
+  }
+
+  _memberCount() {
+    return this._visibleIds().length + (this.inCall ? 1 : 0);
   }
 
   _toRoster(members) {
@@ -346,7 +382,15 @@ export class VoiceManager {
       for (const [id, meta] of this.roster) {
         if (id === this.selfId) continue;
         const p = this._ensurePeer(id, meta);
-        if (p) { p.orphanUntil = 0; p.muted = meta.muted; p.base = meta.client; }
+        if (!p) continue;
+        p.orphanUntil = 0;
+        p.muted = meta.muted;
+        p.base = meta.client;
+        // Вернулся в состав, а соединение всё это время было живым: гасить
+        // точку больше не за что. Без этого после каждого обрыва сигналинга
+        // сосед навсегда оставался бы бледным при работающем звуке —
+        // connectionState не менялся, значит и события состояния не будет.
+        if (p.state === 'away' && p.pc && p.pc.connectionState === 'connected') p.state = 'live';
       }
     }
     for (const [id, p] of [...this.peers]) {
@@ -432,7 +476,13 @@ export class VoiceManager {
     // createOffer допустим только в stable/have-local-offer. Если пара прямо
     // сейчас договаривается, рестарт не нужен: текущий обмен либо закончится
     // сам, либо его подберёт сторож по dialDeadline.
-    if (restart && p.pc.signalingState !== 'stable') return;
+    if (restart && p.pc.signalingState !== 'stable') {
+      // Сторож уже обнулил срок, и просто выйти отсюда значит замолчать
+      // навсегда: пара, застрявшая в have-local-offer, никогда бы не
+      // перенабралась. Взводим срок заново и ждём следующего круга.
+      p.dialDeadline = Date.now() + 4000;
+      return;
+    }
     p.dialDeadline = Date.now() + NEGOTIATE_TIMEOUT;
     try {
       p.makingOffer = true;
@@ -806,9 +856,8 @@ export class VoiceManager {
       if (!this.inCall) this.micBtn.style.removeProperty('--lvl');
     }
     if (this.statusEl) {
-      this.statusEl.textContent = active
-        ? `В разговоре ${this.roster.size} ${pluralMembers(this.roster.size)}`
-        : '';
+      const n = this._memberCount() || this.roster.size;
+      this.statusEl.textContent = active ? `В разговоре ${n} ${pluralMembers(n)}` : '';
     }
     this._renderDots();
     this._checkLonely();
@@ -826,17 +875,20 @@ export class VoiceManager {
   _renderDots() {
     if (!this.dotsEl) return;
     // Свой голос — это кольцо вокруг микрофона; в ряду точек только остальные.
-    const ids = [...this.roster.keys()].filter(id => id !== this.selfId);
+    const ids = this._visibleIds();
     this.dotsEl.hidden = ids.length === 0;
     this.dotsEl.textContent = '';
     // Ряд пересобирается целиком, поэтому старые ссылки на узлы недействительны:
     // индикатор речи пишет прямо в p.dot и без сброса красил бы отцепленные узлы.
     for (const p of this.peers.values()) p.dot = null;
 
-    const LIMIT = 5;
+    // На узком экране в тулбаре дорога каждая точка. Предел живёт ТОЛЬКО здесь:
+    // когда его дублировали правилом nth-child в CSS, лишние точки исчезали
+    // молча — счётчик «+N» считал по своему пределу и не появлялся вовсе.
+    const LIMIT = (window.matchMedia && window.matchMedia('(max-width: 760px)').matches) ? 3 : 5;
     for (const id of ids.slice(0, LIMIT)) {
-      const meta = this.roster.get(id) || {};
       const p = this.peers.get(id);
+      const meta = this.roster.get(id) || { client: (p && p.base) || id, muted: !!(p && p.muted) };
       const dot = document.createElement('span');
       dot.className = 'voice-dot';
       const c = this._peerColor(meta.client || id);
