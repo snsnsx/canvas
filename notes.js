@@ -168,7 +168,7 @@ export class NotesManager {
 
     const box = el.getBoundingClientRect();
     el.style.left = Math.round(clamp(note.x * k, GUTTER, r.width - box.width - BAR_GUTTER)) + 'px';
-    el.style.top = Math.round(clamp(note.y * r.height, GUTTER, r.height - box.height - GUTTER)) + 'px';
+    el.style.top = Math.round(clamp(note.y * r.height, GUTTER, this.floorFor(r) - box.height - GUTTER)) + 'px';
     this.scheduleRender();
   }
 
@@ -388,6 +388,15 @@ export class NotesManager {
     el.classList.add('dragging');
   }
 
+  // Нижняя граница поля окон в координатах слоя. На узком экране внизу стоят
+  // панель страниц и панель разговора: окно, доехавшее под них, теряет уголок
+  // изменения размера — касание по нему достаётся кнопке чужой панели, а там
+  // «удалить страницу» и «положить трубку».
+  floorFor(r) {
+    const chrome = this.tools?.bottomChromeTop ? this.tools.bottomChromeTop() : window.innerHeight;
+    return Math.max(GUTTER, Math.min(r.height, chrome - 6 - r.top));
+  }
+
   moveDrag(e, el) {
     const d = this.drag;
     if (!d || d.pid !== e.pointerId || d.id !== el.dataset.id) return;
@@ -400,14 +409,14 @@ export class NotesManager {
 
     if (d.mode === 'move') {
       const left = clamp(e.clientX - r.left - d.dx, GUTTER, r.width - d.w - BAR_GUTTER);
-      const top = clamp(e.clientY - r.top - d.dy, GUTTER, r.height - d.h - GUTTER);
+      const top = clamp(e.clientY - r.top - d.dy, GUTTER, this.floorFor(r) - d.h - GUTTER);
       note.x = clamp(left / k, 0, BOARD_W - note.w);
       note.y = top / r.height;
     } else {
       // Размер тянут за уголок холста; нарисованное при этом не растягивается —
       // окно просто показывает больше или меньше поля, как лист бумаги.
       const cr = el.querySelector('.note-canvas').getBoundingClientRect();
-      const maxH = (r.height - (cr.top - r.top) - GUTTER) / k;
+      const maxH = (this.floorFor(r) - (cr.top - r.top) - GUTTER) / k;
       note.w = clamp((e.clientX - cr.left) / k, NOTE_MIN_W, BOARD_W - note.x);
       note.h = clamp((e.clientY - cr.top) / k, NOTE_MIN_H, Math.max(NOTE_MIN_H, maxH));
     }

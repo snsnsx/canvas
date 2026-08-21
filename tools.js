@@ -439,15 +439,31 @@ export class ToolManager {
   // страниц слева и toolbar справа), сверху — под toolbar, снизу — нижнее поле
   // окна. Меряем по самим панелям, а не повторяем расчёты CSS: поле тогда само
   // подстраивается под их размер, а быстрая палитра не наезжает на них сверху.
+  // Верхняя кромка панелей, стоящих внизу окна (на узком экране туда уезжают
+  // страницы и разговор). Ниже этой черты панель класть нельзя: она накроет
+  // чужие кнопки и заберёт себе касания по ним.
+  bottomChromeTop() {
+    let top = window.innerHeight;
+    for (const el of [document.getElementById('pagebar'), document.getElementById('voicebar')]) {
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      // Панель считается нижней, только если она и правда внизу: наверху она
+      // ограничивает поле сверху (через y0), а не снизу.
+      if (r.height && r.top > window.innerHeight / 2) top = Math.min(top, r.top);
+    }
+    return top;
+  }
+
   quickField() {
     const w = this.qbar.offsetWidth;
     const h = this.qbar.offsetHeight;
     const tb = document.querySelector('.toolbar')?.getBoundingClientRect();
     const pb = document.getElementById('pagebar')?.getBoundingClientRect();
-    const x0 = pb ? pb.left : 8;
+    const x0 = pb && pb.top < window.innerHeight / 2 ? pb.left : 8;
     const y0 = (tb ? tb.bottom : 44) + 6;
     const availW = Math.max(0, (tb ? tb.right : window.innerWidth - 8) - w - x0);
-    const availH = Math.max(0, window.innerHeight - 10 - h - y0);
+    // Снизу поле упирается не в край окна, а в нижние панели.
+    const availH = Math.max(0, Math.min(window.innerHeight - 10, this.bottomChromeTop() - 6) - h - y0);
     // Узлов тем больше, чем больше места, но не меньше двух на ось: даже на
     // крошечном окне у панели остаётся выбор между краями.
     const cols = Math.max(2, Math.round(availW / QB_STEP) + 1);
@@ -1906,7 +1922,8 @@ export class ToolManager {
     const bars = [
       document.querySelector('.toolbar'),
       document.getElementById('pagebar'),
-      document.getElementById('quickbar')
+      document.getElementById('quickbar'),
+      document.getElementById('voicebar')
     ].filter(Boolean);
     const onPress = (e) => {
       const btn = e.target.closest('.btn, .swatch, .size, .presence');

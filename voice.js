@@ -65,12 +65,15 @@ export class VoiceManager {
     this.lonelyTimer = null;
     this.welcomeTimer = null;
     this.rejoinAt = 0;
+    this.narrow = null;
     this.unlockArmed = false;
     this.warnedFail = false;
     this.reloadArmedUntil = 0;
 
+    this.barEl = null;
     this.callBtn = null;
     this.micBtn = null;
+    this.levelEl = null;
     this.dotsEl = null;
     this.statusEl = null;
     this.sinks = null;
@@ -79,8 +82,10 @@ export class VoiceManager {
   // ---------- жизненный цикл ----------
 
   init() {
+    this.barEl = document.getElementById('voicebar');
     this.callBtn = document.getElementById('callBtn');
     this.micBtn = document.getElementById('micBtn');
+    this.levelEl = document.getElementById('voiceLevel');
     this.dotsEl = document.getElementById('voiceDots');
     this.statusEl = document.getElementById('voiceStatus');
     this.sinks = document.getElementById('voiceSinks') || document.body;
@@ -113,6 +118,16 @@ export class VoiceManager {
     };
     window.addEventListener('pagehide', bye);
     window.addEventListener('beforeunload', bye);
+
+    // Сколько точек помещается в ряд, зависит от ширины окна, а решается это
+    // при отрисовке. Без пересчёта на смене раскладки повёрнутый телефон
+    // остался бы с «широким» рядом до ближайшего изменения состава.
+    this.narrow = window.matchMedia ? window.matchMedia('(max-width: 760px)') : null;
+    if (this.narrow) {
+      const relayout = () => this._renderDots();
+      if (this.narrow.addEventListener) this.narrow.addEventListener('change', relayout);
+      else if (this.narrow.addListener) this.narrow.addListener(relayout);
+    }
 
     this._syncUI();
   }
@@ -747,9 +762,17 @@ export class VoiceManager {
         const lv = this.muted ? 0 : this._rms(this.localMeter.an, this.localMeter.buf);
         this.micBtn.style.setProperty('--lvl', (Math.min(1, lv * 6) * 5).toFixed(2) + 'px');
       }
+      // Громкость разговора — самый громкий из собеседников. Не сумма: от суммы
+      // индикатор упирался бы в потолок втроём при обычной речи, и «громко» уже
+      // ничем не отличалось бы от «нормально». Свой голос сюда не входит — его
+      // показывает кольцо вокруг микрофона, и путать «меня слышно» с «мне
+      // слышно» нельзя.
+      let loudest = 0;
       for (const p of this.peers.values()) {
-        if (!p.an || !p.dot) continue;
+        if (!p.an) continue;
         const lv = p.muted ? 0 : this._rms(p.an, p.buf);
+        if (lv > loudest) loudest = lv;
+        if (!p.dot) continue;
         if (lv > SPEAK_ON) { p.speaking = true; p.quietAt = 0; }
         else if (lv < SPEAK_OFF) {
           if (!p.quietAt) p.quietAt = now;
@@ -758,6 +781,9 @@ export class VoiceManager {
         p.dot.classList.toggle('speaking', p.speaking);
         p.dot.style.setProperty('--lvl',
           (p.speaking ? 2 + Math.min(1, lv * 6) * 4 : 0).toFixed(2) + 'px');
+      }
+      if (this.levelEl) {
+        this.levelEl.style.setProperty('--lvl', Math.min(1, loudest * 6).toFixed(3));
       }
     };
     // rAF, а не setInterval: в фоновой вкладке кадры замирают сами, и разговор
@@ -769,6 +795,7 @@ export class VoiceManager {
     if (this.meterRaf) cancelAnimationFrame(this.meterRaf);
     this.meterRaf = null;
     if (this.micBtn) this.micBtn.style.removeProperty('--lvl');
+    if (this.levelEl) this.levelEl.style.removeProperty('--lvl');
   }
 
   // ---------- сторож ----------
@@ -845,15 +872,25 @@ export class VoiceManager {
       this.callBtn.setAttribute('aria-label', label);
       this.callBtn.title = st === 'insecure' ? 'Разговор доступен только по https' : label;
     }
+    // Микрофон и уровень громкости стоят в панели всегда, даже когда разговора
+    // нет: место под них занято с самого начала, и звонок ничего не сдвигает
+    // под уже занесённым пальцем. Вне разговора они гаснут — «есть, но пока
+    // нечем управлять» честнее, чем кнопка, появляющаяся из ниоткуда.
     if (this.micBtn) {
-      this.micBtn.hidden = !this.inCall;
-      this.micBtn.classList.toggle('muted', this.muted);
+      this.micBtn.disabled = !this.inCall;
+      this.micBtn.classList.toggle('muted', this.inCall && this.muted);
       this.micBtn.classList.toggle('on', this.inCall && !this.muted);
-      this.micBtn.setAttribute('aria-pressed', this.muted ? 'true' : 'false');
-      const label = this.muted ? 'Включить микрофон' : 'Выключить микрофон';
+      this.micBtn.setAttribute('aria-pressed', this.inCall && this.muted ? 'true' : 'false');
+      const label = this.inCall
+        ? (this.muted ? 'Включить микрофон' : 'Выключить микрофон')
+        : 'Микрофон — доступен во время разговора';
       this.micBtn.setAttribute('aria-label', label);
-      this.micBtn.title = `${label} (M)`;
+      this.micBtn.title = this.inCall ? `${label} (M)` : label;
       if (!this.inCall) this.micBtn.style.removeProperty('--lvl');
+    }
+    if (this.levelEl) {
+      this.levelEl.classList.toggle('on', this.inCall);
+      if (!this.inCall) this.levelEl.style.removeProperty('--lvl');
     }
     if (this.statusEl) {
       const n = this._memberCount() || this.roster.size;
@@ -877,6 +914,9 @@ export class VoiceManager {
     // Свой голос — это кольцо вокруг микрофона; в ряду точек только остальные.
     const ids = this._visibleIds();
     this.dotsEl.hidden = ids.length === 0;
+    // Панели нужно знать, чем начинается её группа: у точки нет собственного
+    // «воздуха», и отступ до корпуса считается иначе, чем у кнопки.
+    this.barEl?.classList.toggle('has-dots', ids.length > 0);
     this.dotsEl.textContent = '';
     // Ряд пересобирается целиком, поэтому старые ссылки на узлы недействительны:
     // индикатор речи пишет прямо в p.dot и без сброса красил бы отцепленные узлы.
@@ -885,7 +925,8 @@ export class VoiceManager {
     // На узком экране в тулбаре дорога каждая точка. Предел живёт ТОЛЬКО здесь:
     // когда его дублировали правилом nth-child в CSS, лишние точки исчезали
     // молча — счётчик «+N» считал по своему пределу и не появлялся вовсе.
-    const LIMIT = (window.matchMedia && window.matchMedia('(max-width: 760px)').matches) ? 3 : 5;
+    const LIMIT = (this.narrow ? this.narrow.matches
+      : window.matchMedia && window.matchMedia('(max-width: 760px)').matches) ? 3 : 5;
     for (const id of ids.slice(0, LIMIT)) {
       const p = this.peers.get(id);
       const meta = this.roster.get(id) || { client: (p && p.base) || id, muted: !!(p && p.muted) };
