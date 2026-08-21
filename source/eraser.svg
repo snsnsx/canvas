@@ -1,15 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" class="m-icon" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
   <rect data-dc-tpl="8" x="9" y="9" width="102" height="102" rx="11" fill="#C9A87C"/>
   <rect data-dc-tpl="9" x="12" y="12" width="96" height="96" rx="8.5" fill="#EBD6B2"/>
-  <g data-dc-tpl="10" transform="translate(22.5,14.7) scale(0.697)" fill="#1B3A6B">
-    <path data-dc-tpl="11" d="M97 52 C106 58 107 70 103 79" fill="none" stroke="#1B3A6B" stroke-width="4" stroke-linecap="round"/>
-    <ellipse data-dc-tpl="12" cx="69" cy="60" rx="32" ry="24"/>
-    <rect data-dc-tpl="13" x="40" y="70" width="15" height="28" rx="7"/>
-    <rect data-dc-tpl="14" x="63" y="70" width="12" height="25" rx="6"/>
-    <rect data-dc-tpl="15" x="85" y="70" width="15" height="28" rx="7"/>
-    <circle data-dc-tpl="16" cx="38" cy="56" r="21"/>
-    <path data-dc-tpl="17" d="M42.2 49.9 C41.1 52.4 36.8 58.8 35 63.1 C33.4 67.2 30.8 71.9 28.7 76.8 C27 80.7 24.6 86.1 20.2 90.5 C15.7 94.4 9.9 94.7 4.9 92.5 C-0.1 89.9 -1.8 84.3 -2.8 79.8 C-3.7 74.4 -0.5 68.1 -0.2 66.7 A2.7 2.7 0 0 1 5.2 67.3 C4.8 69.9 4.5 76.5 4.8 78.2 C5.5 80.9 9.2 83.5 9.1 83.5 C9.1 83.4 11.2 82.2 11.8 81.5 C12.2 81 13.3 76 15.3 71.2 C16.8 67.4 17 62.2 19 56.9 C20.9 51.9 22.9 44.2 23.8 42.1 Z"/>
-    <path data-dc-tpl="18" d="M40 36 C54 32 64 40 62 52 C60 63 50 68 44 62 C39 57 36 42 40 36 Z"/>
-    <circle data-dc-tpl="20" cx="27" cy="51" r="3" fill="#EBD6B2"/>
-  </g>
+  <path d="M83 35H47v50h37M47 60h31" fill="none" stroke="#1B3A6B" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

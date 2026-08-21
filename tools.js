@@ -283,16 +283,18 @@ export class ToolManager {
     if (!wrap) return;
     wrap.innerHTML = '';
     [
+      { presetIndex: 0, title: 'Малая толщина', ariaLabel: 'Малая толщина инструмента' },
       { presetIndex: 1, title: 'Средняя толщина', ariaLabel: 'Средняя толщина инструмента' },
       { presetIndex: 2, title: 'Большая толщина', ariaLabel: 'Большая толщина инструмента' }
     ].forEach(({ presetIndex, title, ariaLabel }) => {
       const b = document.createElement('button');
       b.className = 'size';
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
       b.dataset.i = presetIndex;
       b.title = title;
       b.setAttribute('aria-label', ariaLabel);
-      b.setAttribute('aria-pressed', 'false');
-      b.innerHTML = `<span class="pip" aria-hidden="true">${presetIndex}</span>`;
+      b.setAttribute('aria-checked', 'false');
       b.addEventListener('click', () => {
         const t = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
         if (this.storage.tool === 'select' || this.storage.tool === 'lasso') {
@@ -302,6 +304,25 @@ export class ToolManager {
         this.syncTools();
       });
       wrap.appendChild(b);
+    });
+
+    // Радиогруппа ведёт себя как системный сегментированный контрол: стрелки
+    // переходят к соседней толщине, Home/End — к краям шкалы.
+    wrap.addEventListener('keydown', (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+      e.preventDefault();
+      const t = (this.storage.tool === 'select' || this.storage.tool === 'lasso') ? 'pen' : this.storage.tool;
+      const current = this.storage.sizeIdx[t];
+      let next = current;
+      if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = 2;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (current + 2) % 3;
+      else next = (current + 1) % 3;
+      const button = wrap.querySelector(`.size[data-i="${next}"]`);
+      if (button) {
+        button.click();
+        button.focus();
+      }
     });
   }
 
@@ -339,7 +360,8 @@ export class ToolManager {
     document.querySelectorAll('#sizes .size').forEach(b => {
       const selected = Number(b.dataset.i) === this.storage.sizeIdx[st];
       b.classList.toggle('sel', selected);
-      b.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      b.setAttribute('aria-checked', selected ? 'true' : 'false');
+      b.tabIndex = selected ? 0 : -1;
     });
     if (this.storage.tool !== 'eraser') this.hideEraserCursor();
     this.stage.classList.toggle('lasso', this.storage.tool === 'lasso');
@@ -570,9 +592,8 @@ export class ToolManager {
     this.qpos.folded = !this.qpos.folded;
     this.qbar.classList.toggle('folded', this.qpos.folded);
     this.syncQuickFold();
-    // Габарит панели изменился, а с ним и поле её хода: пересаживаем корпус
-    // в узел заново, иначе свёрнутая пилюля осталась бы стоять по углу
-    // развёрнутой панели.
+    // Высота панели изменилась, а с ней и вертикальное поле её хода. Ширина
+    // корпуса остаётся постоянной, чтобы сворачивание не сдвигало панель по X.
     this.qbar.classList.add('settling');
     this.placeQuick();
     this.saveQuickPos();
@@ -1926,13 +1947,13 @@ export class ToolManager {
       document.getElementById('voicebar')
     ].filter(Boolean);
     const onPress = (e) => {
-      const btn = e.target.closest('.btn, .swatch, .size, .presence');
+      const btn = e.target.closest('.btn, .swatch, .presence');
       if (!btn || btn.disabled) return;
       // У кнопок разговора две иконки в одной ячейке, и скрыта та, что не по
       // состоянию: берём первую ВИДИМУЮ, иначе пружина досталась бы display:none
       // и нажатие выглядело бы мёртвым. getClientRects() у скрытой пуст.
       let inner = btn;
-      for (const el of btn.querySelectorAll('.m-icon, .dot, .pip')) {
+      for (const el of btn.querySelectorAll('.m-icon, .dot')) {
         if (el.getClientRects().length) { inner = el; break; }
       }
       this.springPop(inner, 0.8, 'tap-pop');
