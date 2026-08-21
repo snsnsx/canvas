@@ -363,6 +363,11 @@
     height: 24px;
   }
 
+  #delPageBtn .m-icon {
+    width: 23px;
+    height: 23px;
+  }
+
   #exportBtn .m-icon {
     width: 17px;
     height: 17px;
@@ -433,6 +438,11 @@
      а тонкая рамка лишь подчёркивает их границы. */
   .sizes {
     --size-segment: 26px;
+    /* Серая обводка выбранного сегмента. На чёрной заливке она читается как
+       средне-серый, поэтому задана осветлением, а не цветом линий: при смене
+       заливки контур останется на том же расстоянии от неё по светлоте. */
+    --size-sel-ring: rgba(255, 255, 255, 0.34);
+    --size-sel-ring-w: 2px;
     display: grid;
     grid-template-columns: repeat(3, var(--size-segment));
     width: calc(var(--size-segment) * 3 + 2px);
@@ -443,28 +453,72 @@
   }
 
   .size {
+    position: relative;
     width: var(--size-segment);
     height: var(--size-segment);
     padding: 0;
-    border: 1px solid var(--line);
+    /* Собственной рамки у сегмента нет: по краям полосы его границу уже рисует
+       рамка контейнера, а прямоугольный контур сегмента пересекал бы её
+       скругление наискось. Разделители внутри — отдельные линии (см. ниже).
+       Внутренние углы прямые. */
+    border: 0;
     border-radius: 0;
     background: transparent;
     cursor: pointer;
-    transition: background-color 120ms ease, border-color 120ms ease;
+    transition: background-color 120ms ease, box-shadow 120ms ease;
   }
 
+  /* Наружные углы крайних сегментов повторяют внутренний радиус полосы (14px
+     минус её рамка). Заливку там и так обрезает контур контейнера — радиус
+     нужен обводке: она идёт по форме бокса, и без него её угол резал бы
+     скругление полосы наискось. Внутренние углы остаются прямыми. */
+  .size:first-child {
+    border-radius: 13px 0 0 13px;
+  }
+
+  .size:last-child {
+    border-radius: 0 13px 13px 0;
+  }
+
+  /* Разделитель — линия того же цвета и толщины, что и внешняя рамка, поэтому
+     все линии полосы читаются как одна система. Она отдельный слой, а не рамка
+     сегмента: так линия гаснет рядом с обводкой выбранного, не трогая ни его
+     заливку, ни ширину сегмента. */
+  .size + .size::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--line-strong);
+    transition: opacity 120ms ease;
+  }
+
+  /* Полоса обрезает всё, что выходит за её контур, поэтому фокус уходит внутрь:
+     снаружи кольцо срезалось бы вместе с углами. */
   .size:focus-visible {
     outline-color: var(--accent);
-    outline-offset: 1px;
+    outline-offset: -2px;
   }
 
   .size:not(.sel):hover {
     background: rgba(21, 21, 21, 0.07);
   }
 
+  /* Выбранный сегмент — заливка с серой обводкой по своим границам. Обводка
+     идёт внутрь: полоса обрезает всё, что выходит за её контур, а на краях она
+     ложится ровно вдоль внешней рамки и повторяет её скругление. */
   .size.sel {
-    border-color: var(--text);
     background: var(--text);
+    box-shadow: inset 0 0 0 var(--size-sel-ring-w) var(--size-sel-ring);
+  }
+
+  /* Собственные разделители по бокам выбранного сегмента убираются: рядом с
+     его обводкой они складывались бы в двойную линию. */
+  .size.sel::before,
+  .size.sel + .size::before {
+    opacity: 0;
   }
 
   .swatch .dot {
@@ -775,7 +829,8 @@
     .voice-dot,
     .voice-level i,
     .voice-mic .voice-ring,
-    .size {
+    .size,
+    .size::before {
       transition: none;
     }
   }
@@ -1104,14 +1159,18 @@
      её по самим панелям, чтобы быстрая палитра не наезжала на них сверху.
      Положение и свёрнутость переживают перезагрузку (localStorage). */
   .quickbar {
-    --qb-cell: 38px;
+    /* Ячейка ужата к самому свотчу: видимый зазор в панели складывается из
+       запаса внутри ячейки и gap, поэтому уменьшать нужно прежде всего ячейку —
+       при 38px вокруг 28px-точки оставалось 10px воздуха на каждой стороне. */
+    --qb-cell: 34px;
+    --qb-gap: 0px;
     position: fixed;
     z-index: 24;
     top: 0;
     left: 0;
     display: flex;
     flex-direction: column;
-    width: calc(var(--qb-cell) * 3 + var(--tb-item) * 2 + var(--tb-pad) * 2 + 2px);
+    width: calc(var(--qb-cell) * 3 + var(--qb-gap) * 2 + var(--tb-pad) * 2 + 2px);
     gap: 2px;
     padding: var(--tb-pad);
     border: 1px solid var(--line);
@@ -1233,7 +1292,7 @@
   .quick-body {
     display: grid;
     grid-template-columns: repeat(3, var(--qb-cell));
-    gap: var(--tb-item);
+    gap: var(--qb-gap);
   }
 
   .quick-body .swatches {
@@ -1273,12 +1332,12 @@
     z-index: 23;
     opacity: 0;
     pointer-events: none;
-    background-image: radial-gradient(circle, var(--line-strong) 1.6px, transparent 2.1px);
+    background-image: radial-gradient(circle, var(--line-strong) 1.2px, transparent 1.7px);
     transition: opacity 150ms ease;
   }
 
   .quick-grid-hint.show {
-    opacity: 0.55;
+    opacity: 0.45;
   }
 
   /* Резинка листа: пока прокрутку продолжают за конец страницы, лист (и его
